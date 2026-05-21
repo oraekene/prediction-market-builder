@@ -1,0 +1,12 @@
+
+  [32m[1mVITE[22m v6.4.2[39m  [2mready in [0m[1m4407[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.43.245:[1m5173[22m/[39m
+[2m13:18:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/StrategiesPage.tsx, /src/index.css[22m
+[2m13:20:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/StrategiesPage.tsx, /src/index.css[22m
+[2m13:20:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2msrc/components/ui/index.ts[22m
+[2m13:23:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/StrategiesPage.tsx, /src/index.css[22m
+[2m13:23:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/StrategiesPage.tsx, /src/index.css[22m
+[2m15:57:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/markets/MarketTable.tsx[22m
+[2m15:57:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/AnalyticsPage.tsx, /src/index.css[22m

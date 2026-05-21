@@ -1,0 +1,96 @@
+
+
+# AGENTIC SEARCH INFRASTRUCTURE
+
+---
+
+### Layer 1 — Discovery: **SearXNG**
+- **Role:** Metasearch engine that fans out queries across Google, Bing, DuckDuckGo, and 240+ engines simultaneously.
+- **Why it's chosen:** Avoids the severe rate-limiting you'd get from hammering a single search engine. Gives you diverse, deduplicated candidate URLs for job listings.
+- **Output:** A list of raw job page URLs passed downstream.
+
+---
+
+### Layer 2 — Fast Parsing / Scout: **Scrapling**
+- **Role:** Lightweight static HTML scraper (Python). Hits each URL first before anything heavier is invoked.
+- **What it does:** Converts the raw HTML string into a searchable DOM tree to check: Is this actually a job page? Is there an "Apply" button? Is it a login screen?
+- **Key constraint:** It is a *reader only* — no clicking, no typing, no JS execution. It cannot render a page, compute an Accessibility Tree, or understand semantic meaning. It sees `<input id='q_123'>` but doesn't know that field is asking about Kubernetes experience.
+- **Comparable tools mentioned:** BeautifulSoup, Selectolax — all in the same "fast static parsing" category.
+- **Why Scrapling over Firecrawl:** Firecrawl was the original suggestion but was replaced — it's considered too heavy. Scrapling is significantly lighter and faster for targeted DOM parsing when the URL is already known.
+- **Memory advantage on 1 GB RAM:** Because it doesn't boot a browser, it has a minimal footprint and should be run, then *killed*, before the browser layer is launched.
+
+---
+
+### Layer 3 — Stealth Browser: **Camoufox (inside Playwright)**
+- **Role:** A hardened fork of Firefox with C++-level bot detection spoofing.
+- **What it handles:** Cloudflare, DataDome, and other ATS bot-protection systems that instantly flag standard Puppeteer or vanilla Playwright instances. It mimics real human browser headers and TLS fingerprints.
+- **What it does NOT do:** It is *not* the brain. It doesn't understand what a "Job Title" field means versus a "Why do you want to work here?" field. It is the stealth container — the hands and the invisibility cloak.
+- **Invocation rule:** Only boot Camoufox *after* Scrapling has confirmed the page needs interaction. This is critical on a 1 GB instance — a single Firefox tab consumes 400–600 MB.
+- **Run mode:** Always headless (`headless=True`) on the constrained Oracle instance. Running visually would be impractical and wastes memory.
+
+---
+
+### Layer 4 — DOM Extraction: **Playwright** (`page.accessibility.snapshot()`)
+- **Role:** The automation framework that *drives* Camoufox and extracts the Accessibility Tree.
+- **The key API:** `page.accessibility.snapshot()` — this reaches into the live rendered browser, processes the DOM, and exports a clean structured tree of only the functional elements: buttons, inputs, labels, text. CSS, scripts, and "div soup" are stripped away.
+- **Why Accessibility Tree over raw HTML:** A raw Workday page HTML can be 50,000+ lines. The Accessibility Tree for the same page is typically ~100 lines — dramatically cheaper and faster to send to an LLM.
+- **Performance tip noted:** Use Playwright's request interception to block images and CSS during tree extraction to reduce Camoufox's memory footprint.
+- **Selenium vs. Playwright vs. Puppeteer:** Selenium is explicitly rejected (too slow, easily caught by bot detectors). Puppeteer is Chrome-specific. Playwright wins because it handles Firefox/WebKit across multiple browser types and provides the best Accessibility Tree API for this use case.
+
+---
+
+### Layer 5 — Intelligence: **LLM API (External)**
+- **Role:** The "brain" of the agent. Receives the Accessibility Tree snapshot + the user's CV as context, then returns a structured JSON object of actions.
+- **Recommended model:** Claude 3.5 Sonnet (described as "the gold standard" for this use case in both files).
+- **Three specific tasks it performs:**
+  1. **Reading Custom Questions** — interprets semantic intent of form fields ("What does this question actually want?")
+  2. **CV Referencing** — cross-references the user's background against requirements ("Does my Rust experience satisfy 'System Programming'?")
+  3. **Dynamic Answer Injection** — generates tailored text responses ("Draft a 200-word answer highlighting specific work on EquityOS")
+- **Output format:** A JSON object of actions, e.g.:
+  ```json
+  { "field_id": "exp_input_4", "action": "type", "text": "5 years of Rust development" }
+  ```
+- **Hard constraint:** Do NOT run the LLM locally (no Ollama/Llama3) on a 1 GB instance. Must use an external API (Anthropic, OpenAI, or Cloudflare AI).
+- **CV loading mechanism:** A local Python script reads the resume (PDF or Markdown) using PyPDF2 or LangChain document loaders and injects it into the LLM's system prompt as context.
+
+---
+
+### Layer 6 — Orchestrator: **Python or Node.js Script**
+- **Role:** The central loop that manages the entire flow and connects every layer.
+- **The loop logic:**
+  1. Camoufox navigates to the job URL.
+  2. Playwright takes an Accessibility Tree snapshot.
+  3. Snapshot + CV context is sent to the LLM API.
+  4. LLM returns the next action(s) in JSON.
+  5. Playwright/Camoufox executes the action (click, type, select).
+  6. A new snapshot is taken and the loop repeats.
+  7. Loop terminates when a "Success" / "Application Submitted" state is detected.
+- **Why not a hardcoded script:** Every ATS platform (Workday, Lever, Greenhouse) has different field IDs and layouts. A hardcoded approach breaks the moment the UI changes. The LLM-in-the-loop approach makes the orchestrator resilient to UI variation.
+
+---
+
+### Memory Management Strategy (Oracle 1 GB Instance)
+This is treated as a first-class concern throughout both files:
+
+- **Batch and Kill:** Run Scrapling to collect a batch of URLs → close Scrapling → open Camoufox → process one URL at a time → close Camoufox before the next.
+- **No co-resident heavy processes:** Do not run Prometheus, Grafana, or Ollama alongside this stack.
+- **Swap:** A 2 GB swap file is used as a safety net, but heavy swap reliance is a failure state — it makes mouse movements slow and jerky, which paradoxically *triggers* bot detection.
+- **Request interception:** Block images and CSS in Playwright to reduce Firefox's live memory usage.
+
+---
+
+### Additional Use Case Noted (in `some_thoughts_on_agentic_search_infra.txt`)
+The same stack is described for **product image scraping** (not just job applications): SearXNG finds candidate product URLs → Scrapling fetches and extracts images bypassing Cloudflare on simple pages → Camoufox handles JS-heavy manufacturer portals → a **vision AI** validates each image actually shows the correct product → images are downloaded, renamed, and organized into a folder. This confirms the stack is generalizable beyond job applications to any agentic web data collection task.
+
+---
+
+### Final Canonical Stack Summary
+
+| Layer | Tool | Role |
+|---|---|---|
+| Discovery | SearXNG | Multi-engine URL discovery |
+| Fast Parse / Gate | Scrapling | Lightweight DOM check, no browser |
+| Stealth Browser | Camoufox | Anti-fingerprint Firefox container |
+| DOM Extraction | Playwright | Drives browser, extracts Accessibility Tree |
+| Intelligence | LLM API (Claude/GPT) | Interprets page, references CV, generates actions |
+| Orchestration | Python/Node script | The loop connecting all layers |
