@@ -7,6 +7,7 @@ const navItems = [
   { path: '/analytics', label: 'Analytics' },
   { path: '/research', label: 'Research' },
   { path: '/settings', label: 'Settings' },
+  { path: '/paper-trading', label: 'Paper Trading' },
 ]
 
 export default function Header() {

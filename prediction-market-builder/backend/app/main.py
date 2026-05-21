@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, create_tables
-from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades
+from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading
 from app.services.research_scheduler import ResearchScheduler
 from app.services.market_aggregator import MarketAggregator
 from app.services.strategy_engine import StrategyEngine
@@ -284,6 +284,7 @@ app.include_router(repl.router)
 app.include_router(alchemy.router)
 app.include_router(risk_templates.router)
 app.include_router(trades.router)
+app.include_router(paper_trading.router)
 
 
 @app.get("/health")
