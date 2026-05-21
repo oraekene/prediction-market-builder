@@ -6,8 +6,6 @@ from app.services.portfolio_manager import PortfolioManager
 from app.services.risk_node_handlers import register_risk_handlers
 
 _RISK_REGISTRY: NodeRegistry | None = None
-CONDITION_EVALUATORS = {}
-ACTION_EXECUTORS = {}
 
 
 def _get_risk_registry() -> NodeRegistry:
@@ -18,92 +16,55 @@ def _get_risk_registry() -> NodeRegistry:
     return _RISK_REGISTRY
 
 
-def register_condition(name: str):
-    def decorator(fn):
-        CONDITION_EVALUATORS[name] = fn
-        return fn
-    return decorator
+_CONDITION_NODE_MAP = {
+    "max_drawdown": "drawdown_monitor",
+    "min_confidence": "min_confidence",
+    "max_position_size": "position_size_check",
+    "always": "always",
+}
+
+_ACTION_NODE_MAP = {
+    "reject": "reject_action",
+    "approve": "approve_action",
+    "scale_position": "position_sizer",
+    "fixed_fraction": "position_sizer",
+}
 
 
-def register_action(name: str):
-    def decorator(fn):
-        ACTION_EXECUTORS[name] = fn
-        return fn
-    return decorator
+def _condition_to_node(cond_type: str, cond_params: dict) -> dict | None:
+    node_type = _CONDITION_NODE_MAP.get(cond_type)
+    if node_type is None:
+        return None
+    data = {}
+    if cond_type == "max_drawdown":
+        data["max_drawdown"] = cond_params.get("threshold", 0.15)
+    elif cond_type == "min_confidence":
+        data["min_confidence"] = cond_params.get("min_confidence", 0.5)
+    elif cond_type == "max_position_size":
+        data["max_size"] = cond_params.get("max_size", 0.2)
+    else:
+        data = dict(cond_params)
+    return {"id": f"cond_{cond_type}", "type": node_type, "data": data}
 
 
-@register_condition("max_drawdown")
-def _cond_drawdown(params: dict, signal: dict, portfolio: dict, _size: float) -> bool:
-    peak = portfolio.get("peak_capital", portfolio.get("current_capital", 10000))
-    current = portfolio.get("current_capital", 10000)
-    if peak <= 0:
-        return False
-    drawdown = (peak - current) / peak
-    return drawdown >= params.get("threshold", 0.15)
-
-
-@register_condition("min_confidence")
-def _cond_confidence(params: dict, signal: dict, _portfolio: dict, _size: float) -> bool:
-    return signal.get("confidence", 0) < params.get("min_confidence", 0.5)
-
-
-@register_condition("max_position_size")
-def _cond_position_size(params: dict, _signal: dict, _portfolio: dict, suggested_size: float) -> bool:
-    return suggested_size > params.get("max_size", 0.2)
-
-
-@register_condition("always")
-def _cond_always(_params: dict, _signal: dict, _portfolio: dict, _size: float) -> bool:
-    return True
-
-
-@register_action("reject")
-def _act_reject(result: dict, _params: dict, _signal: dict, _portfolio: dict) -> None:
-    result["approved"] = False
-    result["suggested_size"] = 0.0
-    result["violations"].append("rule_rejected")
-
-
-@register_action("approve")
-def _act_approve(result: dict, _params: dict, _signal: dict, _portfolio: dict) -> None:
-    result["approved"] = True
-    if "rule_rejected" in result["violations"]:
-        result["violations"].remove("rule_rejected")
-    result["violations"].append("rule_approved")
-
-
-@register_action("scale_position")
-def _act_scale(result: dict, params: dict, signal: dict, _portfolio: dict) -> None:
-    factor = params.get("factor", 1.0)
-    current = result.get("suggested_size", 0.0)
-    if current == 0.0:
-        current = _kelly_size(signal, 0.25)
-    result["suggested_size"] = round(current * factor, 4)
-
-
-@register_action("fixed_fraction")
-def _act_fixed(result: dict, params: dict, _signal: dict, _portfolio: dict) -> None:
-    result["suggested_size"] = params.get("fraction", 0.01)
-
-
-def evaluate_rules(rules: list, signal: dict, portfolio: dict) -> dict[str, Any]:
-    result = {"approved": True, "suggested_size": 0.0, "violations": [], "matched_rule": None}
-    for rule in rules:
-        condition = rule.get("condition", {})
-        action = rule.get("action", {})
-        cond_type = condition.get("type", "always")
-        action_type = action.get("type", "approve")
-        if cond_type not in CONDITION_EVALUATORS:
-            continue
-        cond_result = CONDITION_EVALUATORS[cond_type](
-            condition.get("params", {}), signal, portfolio, result["suggested_size"]
-        )
-        if cond_result:
-            if action_type in ACTION_EXECUTORS:
-                ACTION_EXECUTORS[action_type](result, action.get("params", {}), signal, portfolio)
-            result["matched_rule"] = cond_type
-            break
-    return result
+def _action_to_node(action_type: str, action_params: dict, cond_type: str) -> dict:
+    node_type = _ACTION_NODE_MAP.get(action_type, "approve_action")
+    data = {}
+    if action_type == "reject":
+        data["message"] = f"rule {cond_type} rejected"
+        data["severity"] = "error"
+    elif action_type == "approve":
+        data["message"] = f"rule {cond_type} approved"
+        data["severity"] = "info"
+    elif action_type == "scale_position":
+        data["method"] = "kelly"
+        data["factor"] = action_params.get("factor", 1.0)
+    elif action_type == "fixed_fraction":
+        data["method"] = "fixed"
+        data["fraction"] = action_params.get("fraction", 0.01)
+    else:
+        data = dict(action_params)
+    return {"id": f"act_{action_type}", "type": node_type, "data": data}
 
 
 @dataclass
@@ -127,85 +88,36 @@ class RiskManager:
     def evaluate_trade(self, market: dict[str, Any], signal: dict[str, Any],
                        portfolio: dict[str, Any]) -> dict[str, Any]:
         if self.profile.rules:
-            nodes = self._rules_to_graph(self.profile.rules)
-            if nodes:
-                ctx = ExecutionContext(
-                    signal=signal,
-                    portfolio=portfolio,
-                    market=market,
-                )
-                result = self.executor.execute(nodes, [], ctx)
-                if isinstance(result, dict) and result.get("triggered"):
+            ctx = ExecutionContext(
+                signal=signal,
+                portfolio=portfolio,
+                market=market,
+                risk_calculator=self.risk_calc,
+                portfolio_manager=self.portfolio_mgr,
+            )
+            for rule in self.profile.rules:
+                condition = rule.get("condition", {})
+                action = rule.get("action", {})
+                cond_type = condition.get("type", "always")
+                cond_params = condition.get("params", {})
+                action_type = action.get("type", "approve")
+                action_params = action.get("params", {})
+
+                cond_node = _condition_to_node(cond_type, cond_params)
+                if cond_node is None:
+                    continue
+
+                cond_result = self.executor.execute([cond_node], [], ctx)
+                if cond_result.get("triggered"):
+                    act_node = _action_to_node(action_type, action_params, cond_type)
+                    act_result = self.executor.execute([act_node], [], ctx)
                     return {
-                        "approved": False,
-                        "suggested_size": result.get("suggested_size", 0.0),
-                        "violations": [result.get("reason", "rule_rejected")],
-                        "matched_rule": result.get("node_type"),
+                        "approved": act_result.get("approved", False),
+                        "suggested_size": act_result.get("suggested_size", 0.0),
+                        "violations": act_result.get("violations", ["rule_rejected"]),
+                        "matched_rule": cond_type,
                     }
-            result = evaluate_rules(self.profile.rules, signal, portfolio)
-            if result["matched_rule"] is not None:
-                return result
         return self._fallback_evaluate(signal, portfolio)
-
-    CONDITIONS_TO_NODES = {
-        "max_drawdown": "drawdown_monitor",
-        "min_confidence": "var_check",
-        "max_position_size": "position_sizer",
-        "always": None,
-    }
-
-    ACTIONS_TO_NODES = {
-        "reject": "alert",
-        "approve": "alert",
-        "scale_position": "position_sizer",
-        "fixed_fraction": "position_sizer",
-    }
-
-    def _rules_to_graph(self, rules: list[dict]) -> list[dict]:
-        nodes = []
-        for i, rule in enumerate(rules):
-            condition = rule.get("condition", {})
-            action = rule.get("action", {})
-            cond_type = condition.get("type", "always")
-            action_type = action.get("type", "approve")
-            cond_params = condition.get("params", {})
-            action_params = action.get("params", {})
-
-            node_type = self.CONDITIONS_TO_NODES.get(cond_type)
-            if node_type is None and cond_type == "always":
-                pass
-            elif node_type:
-                params = dict(cond_params)
-                if cond_type == "max_position_size":
-                    params["mode"] = "fixed"
-                    params["max_size"] = cond_params.get("max_size", 0.2)
-                elif cond_type == "max_drawdown":
-                    params["threshold"] = cond_params.get("threshold", 0.15)
-                nodes.append({
-                    "id": f"rule_{i}_cond",
-                    "type": node_type,
-                    "params": params,
-                })
-
-            act_node = self.ACTIONS_TO_NODES.get(action_type)
-            if act_node:
-                params = dict(action_params)
-                if action_type == "reject":
-                    params["message"] = f"rule {cond_type} rejected"
-                elif action_type == "approve":
-                    params["message"] = f"rule {cond_type} approved"
-                elif action_type == "scale_position":
-                    params["mode"] = "kelly"
-                    params["factor"] = action_params.get("factor", 1.0)
-                elif action_type == "fixed_fraction":
-                    params["mode"] = "fixed"
-                    params["fraction"] = action_params.get("fraction", 0.01)
-                nodes.append({
-                    "id": f"rule_{i}_action",
-                    "type": act_node,
-                    "params": params,
-                })
-        return nodes
 
     def _fallback_evaluate(self, signal: dict, portfolio: dict) -> dict:
         max_size = self._calculate_kelly_criterion(signal)
@@ -279,17 +191,3 @@ class RiskManager:
         if peak <= 0:
             return 0
         return (peak - current) / peak
-
-
-def _kelly_size(signal: dict, kelly_fraction: float) -> float:
-    probability = signal.get("probability", 0.5)
-    odds = signal.get("market_odds", 0.5)
-    if odds <= 0:
-        return 0
-    b = (1 - odds) / odds
-    p = probability
-    q = 1 - p
-    if b <= 0:
-        return 0
-    kelly = (p * b - q) / b
-    return max(0, kelly * kelly_fraction)

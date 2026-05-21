@@ -119,6 +119,14 @@ def handle_min_confidence(node: dict, inputs: dict, ctx) -> dict[str, Any]:
     return {"triggered": bool(triggered), "confidence": confidence, "min_confidence": min_conf}
 
 
+def handle_max_position_size(node: dict, inputs: dict, ctx) -> dict[str, Any]:
+    data = node.get("data", {})
+    max_size = data.get("max_size", 0.2)
+    suggested_size = inputs.get("suggested_size", 0.0)
+    triggered = suggested_size > max_size
+    return {"triggered": bool(triggered), "max_size": max_size, "suggested_size": suggested_size}
+
+
 def handle_always(node: dict, inputs: dict, ctx) -> dict[str, Any]:
     return {"triggered": True}
 
@@ -128,7 +136,7 @@ def handle_reject_action(node: dict, inputs: dict, ctx) -> dict[str, Any]:
 
 
 def handle_approve_action(node: dict, inputs: dict, ctx) -> dict[str, Any]:
-    return {"approved": True, "suggested_size": 0.0, "violations": []}
+    return {"approved": True, "suggested_size": 0.0, "violations": ["rule_approved"]}
 
 
 def handle_stop_loss(node: dict, inputs: dict, ctx) -> dict[str, Any]:
@@ -200,6 +208,7 @@ def register_risk_handlers(registry):
     registry.register("alert_action", handle_alert_action)
     registry.register("min_confidence", handle_min_confidence)
     registry.register("always", handle_always)
+    registry.register("position_size_check", handle_max_position_size)
     registry.register("reject_action", handle_reject_action)
     registry.register("approve_action", handle_approve_action)
     registry.register("stop_loss", handle_stop_loss)

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models.risk_template import RiskTemplate
-from app.services.risk_engine import evaluate_risk_template
+from app.services.risk_manager import RiskManager, RiskProfile
 
 router = APIRouter(prefix="/api/risk-templates", tags=["risk-templates"])
 
@@ -71,7 +71,9 @@ async def evaluate_risk_template_endpoint(template_id: str, body: dict, session:
         raise HTTPException(404, detail="Risk template not found")
     signal = body.get("signal", {})
     portfolio = body.get("portfolio", {})
-    result = evaluate_risk_template(template, signal, portfolio)
+    profile = RiskProfile(rules=template.rules)
+    mgr = RiskManager(profile)
+    result = mgr.evaluate_trade(market={}, signal=signal, portfolio=portfolio)
     return result
 
 

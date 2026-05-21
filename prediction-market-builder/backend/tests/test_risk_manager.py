@@ -1,5 +1,5 @@
 import pytest
-from app.services.risk_manager import RiskManager, RiskProfile, evaluate_rules, CONDITION_EVALUATORS, ACTION_EXECUTORS
+from app.services.risk_manager import RiskManager, RiskProfile
 
 
 def test_risk_approves_good_signal():
@@ -36,7 +36,9 @@ def test_risk_rejects_max_drawdown():
 
 
 def test_evaluate_rules_none_returns_default_approved():
-    result = evaluate_rules([], {"probability": 0.6}, {})
+    result = RiskManager(RiskProfile(rules=[], min_confidence=0.3)).evaluate_trade(
+        market={}, signal={"probability": 0.6, "confidence": 0.8, "market_odds": 0.55}, portfolio={}
+    )
     assert result["approved"] is True
 
 
@@ -44,7 +46,10 @@ def test_max_drawdown_condition_triggers():
     rules = [
         {"condition": {"type": "max_drawdown", "params": {"threshold": 0.1}}, "action": {"type": "reject"}}
     ]
-    result = evaluate_rules(rules, {}, {"current_capital": 8000, "peak_capital": 10000})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.7, "confidence": 0.8, "market_odds": 0.55},
+        portfolio={"current_capital": 8000, "peak_capital": 10000}
+    )
     assert result["approved"] is False
     assert "rule_rejected" in result["violations"]
 
@@ -53,7 +58,10 @@ def test_max_drawdown_condition_does_not_trigger():
     rules = [
         {"condition": {"type": "max_drawdown", "params": {"threshold": 0.3}}, "action": {"type": "reject"}}
     ]
-    result = evaluate_rules(rules, {}, {"current_capital": 9000, "peak_capital": 10000})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.7, "confidence": 0.8, "market_odds": 0.55},
+        portfolio={"current_capital": 9000, "peak_capital": 10000}
+    )
     assert result["approved"] is True
 
 
@@ -61,7 +69,9 @@ def test_min_confidence_condition_triggers():
     rules = [
         {"condition": {"type": "min_confidence", "params": {"min_confidence": 0.7}}, "action": {"type": "reject"}}
     ]
-    result = evaluate_rules(rules, {"confidence": 0.3, "probability": 0.6, "market_odds": 0.5}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"confidence": 0.3, "probability": 0.6, "market_odds": 0.5}, portfolio={}
+    )
     assert result["approved"] is False
 
 
@@ -69,7 +79,9 @@ def test_max_position_size_condition_triggers():
     rules = [
         {"condition": {"type": "max_position_size", "params": {"max_size": 0.1}}, "action": {"type": "reject"}}
     ]
-    result = evaluate_rules(rules, {"probability": 0.6, "market_odds": 0.5}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.6, "confidence": 0.8, "market_odds": 0.5}, portfolio={}
+    )
     assert result["approved"] is True
 
 
@@ -77,7 +89,9 @@ def test_always_condition_triggers_reject():
     rules = [
         {"condition": {"type": "always", "params": {}}, "action": {"type": "reject"}}
     ]
-    result = evaluate_rules(rules, {"probability": 0.9, "confidence": 0.9, "market_odds": 0.5}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.9, "confidence": 0.9, "market_odds": 0.5}, portfolio={}
+    )
     assert result["approved"] is False
 
 
@@ -85,7 +99,10 @@ def test_approve_action_overrides_reject():
     rules = [
         {"condition": {"type": "always", "params": {}}, "action": {"type": "approve"}}
     ]
-    result = evaluate_rules(rules, {"probability": 0.6, "market_odds": 0.5}, {"current_capital": 8000, "peak_capital": 10000})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.6, "market_odds": 0.5},
+        portfolio={"current_capital": 8000, "peak_capital": 10000}
+    )
     assert result["approved"] is True
     assert "rule_approved" in result["violations"]
 
@@ -94,7 +111,9 @@ def test_scale_position_action():
     rules = [
         {"condition": {"type": "always", "params": {}}, "action": {"type": "scale_position", "params": {"factor": 0.5}}}
     ]
-    result = evaluate_rules(rules, {"probability": 0.8, "market_odds": 0.55}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.8, "market_odds": 0.55}, portfolio={}
+    )
     assert result["suggested_size"] > 0
 
 
@@ -102,7 +121,9 @@ def test_fixed_fraction_action():
     rules = [
         {"condition": {"type": "always", "params": {}}, "action": {"type": "fixed_fraction", "params": {"fraction": 0.05}}}
     ]
-    result = evaluate_rules(rules, {"probability": 0.7, "market_odds": 0.5}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.7, "market_odds": 0.5}, portfolio={}
+    )
     assert result["suggested_size"] == 0.05
 
 
@@ -111,7 +132,9 @@ def test_first_matching_rule_wins():
         {"condition": {"type": "always", "params": {}}, "action": {"type": "reject"}},
         {"condition": {"type": "always", "params": {}}, "action": {"type": "approve"}},
     ]
-    result = evaluate_rules(rules, {"probability": 0.6, "market_odds": 0.5}, {})
+    result = RiskManager(RiskProfile(rules=rules)).evaluate_trade(
+        market={}, signal={"probability": 0.6, "market_odds": 0.5}, portfolio={}
+    )
     assert result["approved"] is False
     assert result["matched_rule"] == "always"
 
