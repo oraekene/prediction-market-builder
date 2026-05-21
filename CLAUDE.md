@@ -1,0 +1,1 @@
+When starting a new project from scratch, the first automatic step must be to create a GitHub repository: initialize git, add a .gitignore, make an initial commit, create the remote repo (via `gh repo create`), and push.
