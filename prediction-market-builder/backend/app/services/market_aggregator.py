@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import random
 from datetime import datetime, timedelta, timezone
@@ -186,13 +187,15 @@ class MarketAggregator:
 
     async def fetch_all(self, platforms: list[str] | None = None) -> list[dict[str, Any]]:
         targets = platforms or list(self.connectors.keys())
-        results = []
-        for platform in targets:
-            connector = self.connectors.get(platform)
-            if connector:
-                try:
-                    markets = await connector.fetch_markets()
-                    results.extend(markets)
-                except Exception as e:
-                    print(f"Failed to fetch from {platform}: {e}")
-        return results
+        connectors = {p: self.connectors[p] for p in targets if p in self.connectors}
+        results = await asyncio.gather(
+            *(c.fetch_markets() for c in connectors.values()),
+            return_exceptions=True,
+        )
+        combined: list[dict[str, Any]] = []
+        for platform, result in zip(connectors.keys(), results):
+            if isinstance(result, Exception):
+                print(f"Failed to fetch from {platform}: {result}")
+            else:
+                combined.extend(result)
+        return combined

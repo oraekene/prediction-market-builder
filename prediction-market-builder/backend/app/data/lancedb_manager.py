@@ -1,7 +1,16 @@
+import re
 import lancedb
 import pyarrow as pa
 import json
 from app.config import settings
+
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-:.]+$")
+
+
+def _sanitize_id(value: str) -> str:
+    if not _SAFE_ID_RE.match(value):
+        raise ValueError(f"Unsafe ID value: {value!r}")
+    return value
 
 
 class LanceDBManager:
@@ -31,7 +40,8 @@ class LanceDBManager:
         table = self.db.open_table("market_vectors")
         query = table.search(query_vector)
         if filter_ids:
-            ids_str = ",".join(f"'{f}'" for f in filter_ids)
+            safe_ids = [_sanitize_id(f) for f in filter_ids]
+            ids_str = ",".join(f"'{f}'" for f in safe_ids)
             query = query.where(f"market_id IN ({ids_str})")
         return query.limit(top_k).to_list()
 
@@ -48,4 +58,4 @@ class LanceDBManager:
 
     def delete_market_vector(self, id: str):
         table = self.db.open_table("market_vectors")
-        table.delete(f"id = '{id}'")
+        table.delete(f"id = '{_sanitize_id(id)}'")

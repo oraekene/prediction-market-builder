@@ -1,9 +1,13 @@
+import logging
+
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./pmbuilder.db"
-    postgres_url: str = "postgresql+asyncpg://pmuser:pmpass@localhost:5432/pmbuilder"
+    postgres_url: str = "postgresql+asyncpg://pmuser:CHANGE_ME@localhost:5432/pmbuilder"
     duckdb_path: str = "./data/analytics.duckdb"
     lancedb_path: str = "./data/vectors"
     chromadb_path: str = "./data/memory"
@@ -15,7 +19,7 @@ class Settings(BaseSettings):
     tabpfn_model: str = "tabpfn-2.5"
     tabpfn_mode: str = "local"
     market_regime_model: str = "heuristic-ensemble"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
     access_token_expire_minutes: int = 60
     cors_origins: list[str] = ["http://localhost:5173"]
     log_level: str = "INFO"
@@ -24,3 +28,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if not settings.secret_key:
+    logger.warning("SECRET_KEY is not set — JWT auth will fail at runtime. Set it in .env")
+if settings.secret_key == "change-me-in-production":
+    logger.warning("SECRET_KEY is still the placeholder 'change-me-in-production' — this is insecure")

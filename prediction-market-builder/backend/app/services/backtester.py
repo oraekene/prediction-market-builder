@@ -65,17 +65,20 @@ class Backtester:
                 position = side
                 entry_price = odds
                 entry_time = snapshot.get("timestamp")
+                position_size = self.result.current_capital * 0.1
                 self.result.trades.append({
                     "type": "entry",
                     "side": side,
                     "price": odds,
                     "timestamp": entry_time,
-                    "position_size": self.result.current_capital * 0.1,
+                    "position_size": position_size,
                 })
 
             elif should_sell and position is not None:
                 exit_price = odds
-                pnl = (exit_price - entry_price) * 1000 if position == "yes" else (entry_price - exit_price) * 1000
+                entry_trade = self.result.trades[-1] if self.result.trades else {}
+                pos_size = entry_trade.get("position_size", self.result.current_capital * 0.1)
+                pnl = (exit_price - entry_price) * pos_size if position == "yes" else (entry_price - exit_price) * pos_size
                 self.result.current_capital += pnl
                 self.result.trades.append({
                     "type": "exit",

@@ -35,12 +35,6 @@ class PaperTradingService:
         wallet = result.scalar_one_or_none()
         if wallet:
             wallet.current_balance = wallet.initial_balance
-            await session.execute(
-                select(PaperOrder).where(
-                    PaperOrder.wallet_id == wallet_id,
-                    PaperOrder.status.in_([OrderStatus.PENDING, OrderStatus.PARTIAL]),
-                )
-            )
             rows = (await session.execute(
                 select(PaperOrder).where(
                     PaperOrder.wallet_id == wallet_id,
@@ -84,9 +78,11 @@ class PaperTradingService:
                 rules=risk_profile.get("rules", []),
             )
             risk_mgr = RiskManager(profile)
+            estimated_edge = 0.05
+            belief_probability = min(0.99, max(0.01, price + estimated_edge if side in ("buy", "yes") else 1 - price + estimated_edge))
             risk_result = risk_mgr.evaluate_trade(
                 {"current_odds": price, "platform": platform, "platform_market_id": market_id},
-                {"probability": price, "market_odds": price, "confidence": 0.7},
+                {"probability": belief_probability, "market_odds": price, "confidence": 0.7},
                 {"current_capital": wallet.current_balance, "positions": []},
             )
             if not risk_result["approved"]:
@@ -115,9 +111,10 @@ class PaperTradingService:
             cost = fill_result["filled_amount"] * fill_result["fill_price"]
             wallet.current_balance = round(wallet.current_balance - cost, 2)
 
-            if side in ("sell", "no"):
-                pnl = fill_result["filled_amount"] * (1 - fill_result["fill_price"])
-                order.pnl = round(pnl, 2)
+            if side == "sell":
+                order.pnl = round(fill_result["filled_amount"] * fill_result["fill_price"], 2)
+            else:
+                order.pnl = round(fill_result["filled_amount"] * (1 - fill_result["fill_price"]), 2)
 
         session.add(order)
         await session.commit()
@@ -154,8 +151,7 @@ class PaperTradingService:
             wallet_result = await session.execute(select(PaperWallet).where(PaperWallet.id == order.wallet_id))
             wallet = wallet_result.scalar_one_or_none()
             if wallet:
-                refund = (order.amount - order.filled_amount) * order.fill_price
-                wallet.current_balance = round(wallet.current_balance + refund, 2)
+                wallet.current_balance = round(wallet.current_balance + order.filled_amount * order.fill_price, 2)
 
         order.status = OrderStatus.CANCELLED
         await session.commit()
@@ -210,23 +206,25 @@ class PaperTradingService:
         gross_loss = abs(sum(losses)) if losses else 0
         profit_factor = round(gross_gain / gross_loss, 4) if gross_loss > 0 else float("inf") if gross_gain > 0 else 0
 
-        returns = [o.pnl or 0 for o in orders]
-        avg_return = sum(returns) / len(returns) if returns else 0
-        if len(returns) > 1:
-            variance = sum((r - avg_return) ** 2 for r in returns) / (len(returns) - 1)
+        pnls = [o.pnl or 0 for o in orders]
+        avg_return = sum(pnls) / len(pnls) if pnls else 0
+        if len(pnls) > 1:
+            variance = sum((r - avg_return) ** 2 for r in pnls) / (len(pnls) - 1)
             std_dev = math.sqrt(variance)
             sharpe_ratio = round((avg_return / std_dev) * math.sqrt(252), 4) if std_dev > 0 else 0
         else:
             sharpe_ratio = 0.0
 
-        peak = 0
+        initial_capital = wallet.initial_balance if wallet else 10000.0
+        capital_series = [initial_capital]
+        for p in pnls:
+            capital_series.append(capital_series[-1] + p)
+        peak = initial_capital
         max_dd = 0.0
-        cumulative = 0
-        for r in returns:
-            cumulative += r
-            if cumulative > peak:
-                peak = cumulative
-            dd = (peak - cumulative) / peak if peak > 0 else 0
+        for c in capital_series:
+            if c > peak:
+                peak = c
+            dd = (peak - c) / peak if peak > 0 else 0
             max_dd = max(max_dd, dd)
 
         avg_win = sum(gains) / len(gains) if gains else 0
@@ -310,9 +308,14 @@ class PaperTradingService:
         await session.commit()
         return {"updated": updated, "resolutions": len(resolutions)}
 
+    @staticmethod
+    def _normalize_metric(metric: str) -> str:
+        return metric.replace("-", "_").lower()
+
     async def get_metric(
         self, metric: str, session: AsyncSession, wallet_id: str | None = None, window: int = 0
     ) -> dict[str, Any]:
+        metric = self._normalize_metric(metric)
         if metric == "current_balance":
             value = None
             if wallet_id:
@@ -369,7 +372,7 @@ class PaperTradingService:
                 avg_r = sum(pnls) / total
                 neg_returns = [p for p in pnls if p < 0]
                 if neg_returns:
-                    d_var = sum(p ** 2 for p in neg_returns) / (total - 1)
+                    d_var = sum(p ** 2 for p in neg_returns) / len(neg_returns)
                     d_std = math.sqrt(d_var)
                     value = round((avg_r / d_std) * math.sqrt(252), 4) if d_std > 0 else 0.0
                 else:

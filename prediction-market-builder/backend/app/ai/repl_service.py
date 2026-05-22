@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from RestrictedPython import safe_builtins
-from RestrictedPython.Guards import safer_getattr
+from RestrictedPython.Guards import safer_getattr, guarded_write_property, guarded_write_object, guarded_write_iter
 from RestrictedPython.compile import compile_restricted_exec
 
 logger = logging.getLogger(__name__)
@@ -61,9 +61,9 @@ def _common_builtins() -> dict[str, object]:
         "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
         "chr", "complex", "dict", "dir", "divmod", "enumerate", "filter",
         "float", "format", "frozenset", "hash", "hex", "id", "int", "iter",
-        "len", "list", "map", "max", "min", "next", "object", "oct", "ord",
+        "len", "list", "map", "max", "min", "next", "oct", "ord",
         "pow", "range", "repr", "reversed", "round", "set", "slice", "sorted",
-        "str", "sum", "tuple", "type", "zip",
+        "str", "sum", "tuple", "zip",
     }
     builtins_real = __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
     for name in extras:
@@ -109,6 +109,7 @@ class REPLSession:
             "_getitem_": lambda obj, key: obj[key],
             "_getiter_": lambda obj: iter(obj),
             "_print_": _PrintHandlerFactory(),
+            "_write_": guarded_write_object,
         }
 
     @property

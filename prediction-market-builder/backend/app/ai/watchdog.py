@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL = 30
 STALL_THRESHOLD = 300
 MAX_SESSION_AGE = 86400
-HEARTBEAT_INTERVAL = 15
 
 
 class HealthStatus(str, enum.Enum):
@@ -26,7 +25,6 @@ class WatchdogService:
         self._results: dict[str, dict[str, Any]] = {}
         self._session_activity: dict[str, float] = {}
         self._task: asyncio.Task | None = None
-        self._heartbeat_task: asyncio.Task | None = None
         self._running = False
         self._on_unhealthy: list[Callable[[str, dict[str, Any]], None | dict[str, Any]]] = []
         self._on_recovery: list[Callable[[str], None]] = []
@@ -49,33 +47,32 @@ class WatchdogService:
 
     async def start(self) -> None:
         self._running = True
-        self._task = asyncio.create_task(self._watch_loop())
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        self._task = asyncio.create_task(self._check_loop())
         logger.info("Watchdog started")
 
     async def stop(self) -> None:
         self._running = False
-        for t in (self._task, self._heartbeat_task):
-            if t:
-                t.cancel()
-                try:
-                    await t
-                except asyncio.CancelledError:
-                    pass
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         logger.info("Watchdog stopped")
 
-    async def _heartbeat_loop(self) -> None:
+    async def _check_loop(self) -> None:
         while self._running:
             try:
-                await self._check_heartbeats()
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                await self._run_all_checks()
+                await self._check_sessions()
+                await asyncio.sleep(CHECK_INTERVAL)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.error("Heartbeat check error: %s", exc)
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                logger.error("Watchdog check error: %s", exc)
+                await asyncio.sleep(CHECK_INTERVAL)
 
-    async def _check_heartbeats(self) -> None:
+    async def _run_all_checks(self) -> None:
         for check_name, check_fn in self._checks.items():
             try:
                 result = await asyncio.to_thread(check_fn) if not asyncio.iscoroutinefunction(check_fn) else await check_fn()
@@ -92,7 +89,9 @@ class WatchdogService:
                         logger.warning("Health check '%s' transitioned to UNHEALTHY", check_name)
                         for handler in self._on_unhealthy:
                             try:
-                                handler(check_name, self._results[check_name])
+                                result = handler(check_name, self._results[check_name])
+                                if asyncio.iscoroutine(result):
+                                    await result
                             except Exception as exc:
                                 logger.error("Unhealthy handler failed for '%s': %s", check_name, exc)
                 else:
@@ -101,7 +100,9 @@ class WatchdogService:
                         logger.info("Health check '%s' RECOVERED", check_name)
                         for handler in self._on_recovery:
                             try:
-                                handler(check_name)
+                                result = handler(check_name)
+                                if asyncio.iscoroutine(result):
+                                    await result
                             except Exception as exc:
                                 logger.error("Recovery handler failed for '%s': %s", check_name, exc)
 
@@ -111,33 +112,11 @@ class WatchdogService:
                     self._previously_unhealthy.add(check_name)
                     for handler in self._on_unhealthy:
                         try:
-                            handler(check_name, self._results[check_name])
+                            result = handler(check_name, self._results[check_name])
+                            if asyncio.iscoroutine(result):
+                                await result
                         except Exception:
                             pass
-
-    async def _watch_loop(self) -> None:
-        while self._running:
-            try:
-                await self._run_checks()
-                await self._check_sessions()
-                await asyncio.sleep(CHECK_INTERVAL)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error("Watchdog check error: %s", exc)
-                await asyncio.sleep(CHECK_INTERVAL)
-
-    async def _run_checks(self) -> None:
-        for name, check_fn in self._checks.items():
-            try:
-                result = await asyncio.to_thread(check_fn) if not asyncio.iscoroutinefunction(check_fn) else await check_fn()
-                if isinstance(result, dict):
-                    self._results[name] = result
-                else:
-                    self._results[name] = {"healthy": bool(result)}
-            except Exception as exc:
-                self._results[name] = {"healthy": False, "error": str(exc)}
-                logger.warning("Health check '%s' failed: %s", name, exc)
 
     async def _check_sessions(self) -> None:
         now = time.time()

@@ -1,6 +1,15 @@
 import { useStrategies } from '@/hooks/useStrategies'
 import { formatTime } from '@/lib/utils'
 
+interface StrategyItem {
+  id: string
+  name: string
+  description?: string | null
+  status: string
+  mode: string
+  created_at?: string | null
+}
+
 export default function StrategyList() {
   const { data: strategies, isLoading, error } = useStrategies()
 
@@ -23,7 +32,7 @@ export default function StrategyList() {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {strategies.map((strategy: any) => (
+      {strategies.map((strategy: StrategyItem) => (
         <div
           key={strategy.id}
           className="rounded-lg border border-gray-800 bg-gray-950 p-4 hover:border-gray-700"

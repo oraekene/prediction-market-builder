@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 
 const navItems = [
   { path: '/markets', label: 'Markets' },
@@ -12,6 +13,7 @@ const navItems = [
 
 export default function Header() {
   const location = useLocation()
+  const { user, logout } = useAuth()
   return (
     <header className="border-b border-gray-800 bg-gray-950 px-6 py-3">
       <div className="flex items-center justify-between">
@@ -35,7 +37,10 @@ export default function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-500">Connected</span>
+          <span className="text-sm text-gray-400">{user?.email}</span>
+          <button onClick={logout} className="rounded px-2 py-1 text-xs text-gray-500 hover:text-white">
+            Logout
+          </button>
         </div>
       </div>
     </header>

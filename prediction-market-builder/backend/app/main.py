@@ -3,12 +3,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from sqlalchemy import select
 from app.database import engine, create_tables
 from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading
+from app.routers.auth import get_current_user
 from app.services.research_scheduler import ResearchScheduler
 from app.services.market_aggregator import MarketAggregator
 from app.services.strategy_engine import StrategyEngine
@@ -99,22 +101,18 @@ def _check_chromadb() -> bool:
         return False
 
 
-def _on_unhealthy_handler(check_name: str, check_result: dict) -> None:
+async def _on_unhealthy_handler(check_name: str, check_result: dict) -> None:
     logger.error("UNHEALTHY trigger: %s - %s", check_name, check_result.get("error", "unknown"))
-    loop = asyncio.new_event_loop()
-    try:
-        if check_name == "hermes":
-            orchestrator_instance.hermes = HermesSidecar()
-        loop.run_until_complete(watchdog.track_session_activity("_system"))
-    finally:
-        loop.close()
+    if check_name == "hermes":
+        orchestrator_instance.hermes = HermesSidecar()
+    await watchdog.track_session_activity("_system")
 
 
 def _on_recovery_handler(check_name: str) -> None:
     logger.info("RECOVERY: %s is healthy again", check_name)
 
 
-watchdog.register_health_check("hermes", lambda: hermes.available)
+watchdog.register_health_check("hermes", lambda: orchestrator_instance.hermes.available)
 watchdog.register_health_check("chromadb", _check_chromadb)
 watchdog.register_health_check("scheduler_running", lambda: getattr(scheduler, '_running', False))
 
@@ -123,9 +121,28 @@ watchdog.on_recovery(_on_recovery_handler)
 
 
 @asynccontextmanager
+async def _migrate_passwords():
+    from app.database import async_session
+    from app.models.user import User
+    from passlib.context import CryptContext
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    async with async_session() as session:
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        migrated = 0
+        for u in users:
+            if not u.hashed_password.startswith("$2b$"):
+                u.hashed_password = pwd_ctx.hash(u.hashed_password)
+                migrated += 1
+        if migrated:
+            await session.commit()
+            logger.info("Migrated %d plain-text passwords to bcrypt", migrated)
+
+
 async def lifespan(app: FastAPI):
     git_manager.init_repo()
     await create_tables()
+    await _migrate_passwords()
 
     _register_rlm_tools(tool_registry, rlm)
     _register_repl_tools(tool_registry, repl_service)
@@ -266,25 +283,25 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 
 app.include_router(auth.router)
-app.include_router(markets.router)
-app.include_router(strategies.router)
-app.include_router(chat.router)
-app.include_router(portfolio.router)
-app.include_router(analytics.router)
-app.include_router(research.router)
-app.include_router(risk.router)
-app.include_router(orchestrator.router)
-app.include_router(repl.router)
-app.include_router(alchemy.router)
-app.include_router(risk_templates.router)
-app.include_router(trades.router)
-app.include_router(paper_trading.router)
+app.include_router(markets.router, dependencies=[Depends(get_current_user)])
+app.include_router(strategies.router, dependencies=[Depends(get_current_user)])
+app.include_router(chat.router, dependencies=[Depends(get_current_user)])
+app.include_router(portfolio.router, dependencies=[Depends(get_current_user)])
+app.include_router(analytics.router, dependencies=[Depends(get_current_user)])
+app.include_router(research.router, dependencies=[Depends(get_current_user)])
+app.include_router(risk.router, dependencies=[Depends(get_current_user)])
+app.include_router(orchestrator.router, dependencies=[Depends(get_current_user)])
+app.include_router(repl.router, dependencies=[Depends(get_current_user)])
+app.include_router(alchemy.router, dependencies=[Depends(get_current_user)])
+app.include_router(risk_templates.router, dependencies=[Depends(get_current_user)])
+app.include_router(trades.router, dependencies=[Depends(get_current_user)])
+app.include_router(paper_trading.router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")

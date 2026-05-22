@@ -42,12 +42,14 @@ export function useResearchWebSocket(
   handlers: Record<string, (data: any) => void>,
 ) {
   const wsRef = useRef<ResearchWebSocket | null>(null)
+  const handlersRef = useRef(handlers)
+  handlersRef.current = handlers
 
   useEffect(() => {
     if (!sessionId) return
     const ws = new ResearchWebSocket()
     wsRef.current = ws
-    for (const [type, handler] of Object.entries(handlers)) {
+    for (const [type, handler] of Object.entries(handlersRef.current)) {
       ws.on(type, handler)
     }
     ws.connect(sessionId)

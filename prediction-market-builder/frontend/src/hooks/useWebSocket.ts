@@ -1,26 +1,44 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 
 export function useWebSocket(url: string, onMessage: (data: any) => void) {
   const wsRef = useRef<WebSocket | null>(null)
+  const onMessageRef = useRef(onMessage)
+  const disconnectedRef = useRef(false)
 
-  const connect = useCallback(() => {
-    const ws = new WebSocket(url)
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      onMessage(data)
-    }
-    ws.onclose = () => {
-      setTimeout(connect, 3000)
-    }
-    wsRef.current = ws
-  }, [url, onMessage])
+  onMessageRef.current = onMessage
 
   useEffect(() => {
-    connect()
-    return () => {
-      wsRef.current?.close()
+    disconnectedRef.current = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+    function connect() {
+      if (disconnectedRef.current) return
+      const ws = new WebSocket(url)
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          onMessageRef.current(data)
+        } catch {
+          /* skip malformed messages */
+        }
+      }
+      ws.onclose = () => {
+        if (!disconnectedRef.current) {
+          reconnectTimer = setTimeout(connect, 3000)
+        }
+      }
+      wsRef.current = ws
     }
-  }, [connect])
+
+    connect()
+
+    return () => {
+      disconnectedRef.current = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      wsRef.current?.close()
+      wsRef.current = null
+    }
+  }, [url])
 
   return wsRef
 }

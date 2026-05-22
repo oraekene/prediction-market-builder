@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchMarkets } from '@/lib/api'
+import { fetchMarkets, fetchMarket } from '@/lib/api'
 
 export function useMarkets(params?: Record<string, string>) {
   return useQuery({
@@ -12,7 +12,7 @@ export function useMarkets(params?: Record<string, string>) {
 export function useMarket(id: string) {
   return useQuery({
     queryKey: ['market', id],
-    queryFn: () => fetch(`/api/markets/${id}`).then(r => r.json()),
+    queryFn: () => fetchMarket(id),
     enabled: !!id,
   })
 }

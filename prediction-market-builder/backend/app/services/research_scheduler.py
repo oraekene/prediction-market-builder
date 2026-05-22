@@ -200,13 +200,7 @@ class ResearchScheduler:
                         if stop_event.is_set():
                             break
                         cooldown = 30 if session.mode == SessionMode.CONTINUOUS else 3600
-                        try:
-                            await asyncio.wait_for(
-                                self._wait_until(stop_event, cooldown),
-                                timeout=cooldown + 5,
-                            )
-                        except asyncio.TimeoutError:
-                            pass
+                        await self._wait_until(stop_event, cooldown)
 
                     if session.current_iteration >= max_hypotheses:
                         session.status = SessionStatus.COMPLETED
@@ -403,10 +397,7 @@ class ResearchScheduler:
 
     async def _wait_until(self, stop_event: asyncio.Event, timeout: int) -> None:
         try:
-            await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, stop_event.wait),
-                timeout=timeout,
-            )
+            await asyncio.wait_for(stop_event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             pass
 

@@ -239,7 +239,7 @@ export default function ResearchPage() {
                 </table>
               </div>
               <div className="mt-4">
-                <IterationChart results={results as any} />
+                <IterationChart results={results} />
               </div>
               </>
             )}
