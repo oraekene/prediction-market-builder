@@ -10,6 +10,7 @@ import ResearchPage from '@/pages/ResearchPage'
 import PaperTradingPage from '@/pages/PaperTradingPage'
 import LoginPage from '@/pages/LoginPage'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
+import MetaStrategiesPage from '@/pages/MetaStrategiesPage'
 
 export default function App() {
   return (
@@ -25,6 +26,8 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/research" element={<ResearchPage />} />
             <Route path="/paper-trading" element={<PaperTradingPage />} />
+            <Route path="/meta-strategies" element={<MetaStrategiesPage />} />
+            <Route path="/meta-strategies/:id" element={<MetaStrategiesPage />} />
           </Route>
         </Routes>
         <ChatInterface />

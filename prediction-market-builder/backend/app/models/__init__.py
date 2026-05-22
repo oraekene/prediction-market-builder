@@ -7,6 +7,7 @@ from app.models.research_session import ResearchSession, SessionStatus, SessionM
 from app.models.experiment_result import ExperimentResult
 from app.models.rlm_alpha_vector import RLMAlphaVector
 from app.models.research_config import ResearchSessionConfig
+from app.models.meta_strategy import MetaStrategy, MetaStrategyMode
 
 __all__ = [
     "User", "Market", "MarketPlatform", "MarketStatus",
@@ -14,4 +15,5 @@ __all__ = [
     "StrategyTemplate",
     "ResearchSession", "SessionStatus", "SessionMode", "CompositePreset",
     "ExperimentResult", "RLMAlphaVector", "ResearchSessionConfig",
+    "MetaStrategy", "MetaStrategyMode",
 ]

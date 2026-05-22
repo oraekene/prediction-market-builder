@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from sqlalchemy import select
 from app.database import engine, create_tables
-from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading
+from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies
 from app.routers.auth import get_current_user
 from app.services.research_scheduler import ResearchScheduler
 from app.services.market_aggregator import MarketAggregator
@@ -302,6 +302,7 @@ app.include_router(alchemy.router, dependencies=[Depends(get_current_user)])
 app.include_router(risk_templates.router, dependencies=[Depends(get_current_user)])
 app.include_router(trades.router, dependencies=[Depends(get_current_user)])
 app.include_router(paper_trading.router, dependencies=[Depends(get_current_user)])
+app.include_router(meta_strategies.router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")

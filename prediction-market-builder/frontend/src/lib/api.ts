@@ -177,3 +177,86 @@ export async function fetchPortfolioRisk(): Promise<PortfolioRisk> {
   if (!res.ok) throw new Error('Failed to fetch portfolio risk')
   return res.json()
 }
+
+export async function fetchMetaStrategies(params?: Record<string, string>): Promise<any> {
+  const searchParams = new URLSearchParams(params)
+  const res = await apiFetch(`${BASE_URL}/meta-strategies?${searchParams}`)
+  if (!res.ok) throw new Error('Failed to fetch meta-strategies')
+  return res.json()
+}
+
+export async function createMetaStrategy(data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to create meta-strategy')
+  return res.json()
+}
+
+export async function fetchMetaStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${id}`)
+  if (!res.ok) throw new Error('Meta-strategy not found')
+  return res.json()
+}
+
+export async function updateMetaStrategy(id: string, data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update meta-strategy')
+  return res.json()
+}
+
+export async function deleteMetaStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete meta-strategy')
+  return res.json()
+}
+
+export async function addStrategyToMetaPool(msId: string, strategyId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/strategies?strategy_id=${strategyId}`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to add strategy to pool')
+  return res.json()
+}
+
+export async function removeStrategyFromMetaPool(msId: string, strategyId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/strategies/${strategyId}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to remove strategy from pool')
+  return res.json()
+}
+
+export async function fetchMetaRankings(msId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/rankings`)
+  if (!res.ok) throw new Error('Failed to fetch rankings')
+  return res.json()
+}
+
+export async function evaluateMetaPromotion(msId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/evaluate`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to evaluate promotion')
+  return res.json()
+}
+
+export async function forceMetaPromote(msId: string, strategyId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/force-promote?strategy_id=${strategyId}`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to force promote')
+  return res.json()
+}
+
+export async function fetchMetaPerformance(msId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/meta-strategies/${msId}/performance`)
+  if (!res.ok) throw new Error('Failed to fetch meta performance')
+  return res.json()
+}
