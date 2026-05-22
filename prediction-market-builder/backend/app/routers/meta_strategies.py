@@ -42,16 +42,18 @@ class UpdateMetaStrategyRequest(BaseModel):
 
 
 def _compute_default_score(trades: list[dict[str, Any]], weights: dict[str, float] | None = None) -> dict[str, Any]:
-    w = weights or {"sharpe": 0.35, "win_rate": 0.25, "profit_factor": 0.25, "max_drawdown": 0.15}
+    w = weights or {"sharpe": 0.20, "win_rate": 0.15, "profit_factor": 0.15, "max_drawdown": 0.10, "confidence": 0.10, "expected_value": 0.10, "signal_strength": 0.10, "consistency": 0.10}
+
     pnl_list = [t["pnl"] for t in trades if t.get("pnl") is not None]
-    if len(pnl_list) < 2:
-        total_pnl = sum(pnl_list) if pnl_list else 0.0
-        return {"score": round(max(0, total_pnl) / 1000, 4), "total_trades": len(pnl_list), "total_pnl": round(total_pnl, 2), "win_rate": 0.0}
+    total = len(pnl_list)
+    total_pnl = sum(pnl_list) if pnl_list else 0.0
+
+    if total < 2:
+        return {"score": round(max(0, total_pnl) / 1000, 4), "total_trades": total, "total_pnl": round(total_pnl, 2), "win_rate": 0.0,
+                "confidence": 0.0, "expected_value": 0.0, "signal_strength": 0.0, "consistency": 0.0}
 
     winning = [p for p in pnl_list if p > 0]
-    total = len(pnl_list)
     win_rate = len(winning) / total
-    total_pnl = sum(pnl_list)
     mean_pnl = total_pnl / total
     variance = sum((p - mean_pnl) ** 2 for p in pnl_list) / (total - 1)
     sharpe = (mean_pnl / math.sqrt(variance)) if variance > 0 else 0.0
@@ -73,10 +75,10 @@ def _compute_default_score(trades: list[dict[str, Any]], weights: dict[str, floa
     norm_pnl = max(0.0, min(total_pnl / 10000, 1.0))
 
     score = (
-        norm_sharpe * w.get("sharpe", 0.35)
-        + norm_win * w.get("win_rate", 0.25)
-        + norm_dd * w.get("max_drawdown", 0.15)
-        + norm_pnl * w.get("profit_factor", 0.25)
+        norm_sharpe * w.get("sharpe", 0.20)
+        + norm_win * w.get("win_rate", 0.15)
+        + norm_dd * w.get("max_drawdown", 0.10)
+        + norm_pnl * w.get("profit_factor", 0.15)
     )
 
     return {
@@ -84,6 +86,10 @@ def _compute_default_score(trades: list[dict[str, Any]], weights: dict[str, floa
         "total_trades": total,
         "total_pnl": round(total_pnl, 2),
         "win_rate": round(win_rate, 4),
+        "confidence": 0.0,
+        "expected_value": 0.0,
+        "signal_strength": 0.0,
+        "consistency": 0.0,
     }
 
 

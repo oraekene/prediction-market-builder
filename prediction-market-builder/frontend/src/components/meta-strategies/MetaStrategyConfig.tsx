@@ -127,7 +127,7 @@ export default function MetaStrategyConfig({ metaStrategy: ms }: Props) {
             <h3 className="text-sm font-semibold text-white">Scoring Weights</h3>
             <p className="text-xs text-gray-500">These weights are used by the default scorer. For custom scoring, build a scoring pipeline in the node graph.</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              {(['sharpe', 'win_rate', 'profit_factor', 'max_drawdown'] as const).map((key) => (
+              {(['sharpe', 'win_rate', 'profit_factor', 'max_drawdown', 'confidence', 'expected_value', 'signal_strength', 'consistency'] as const).map((key) => (
                 <div key={key} className="space-y-1">
                   <label className="text-xs text-gray-400 capitalize">{key.replace('_', ' ')}</label>
                   <input
@@ -141,16 +141,6 @@ export default function MetaStrategyConfig({ metaStrategy: ms }: Props) {
                   />
                 </div>
               ))}
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-gray-400">Evaluation Window (days)</label>
-              <input
-                type="number"
-                min="1"
-                value={scoring.evaluation_window_days}
-                onChange={(e) => setScoring({ ...scoring, evaluation_window_days: parseInt(e.target.value) || 30 })}
-                className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white"
-              />
             </div>
           </div>
 
@@ -182,6 +172,16 @@ export default function MetaStrategyConfig({ metaStrategy: ms }: Props) {
                   />
                 </div>
               )}
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400">Evaluation Window (days)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={promotion.evaluation_window_days}
+                  onChange={(e) => setPromotion({ ...promotion, evaluation_window_days: parseInt(e.target.value) || 30 })}
+                  className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white"
+                />
+              </div>
               <div className="space-y-1">
                 <label className="text-xs text-gray-400">Probation (hours)</label>
                 <input

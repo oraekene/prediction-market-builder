@@ -7,14 +7,18 @@ export interface ScoringConfig {
     win_rate: number
     profit_factor: number
     max_drawdown: number
+    confidence: number
+    expected_value: number
+    signal_strength: number
+    consistency: number
   }
-  evaluation_window_days: number
 }
 
 export interface PromotionConfig {
   interval: 'daily' | 'weekly' | 'monthly' | 'custom'
   interval_days?: number | null
   probation_hours: number
+  evaluation_window_days: number
 }
 
 export interface ConfluenceConfig {
@@ -50,6 +54,10 @@ export interface StrategyScore {
   total_trades: number
   total_pnl: number
   win_rate: number
+  confidence: number
+  expected_value: number
+  signal_strength: number
+  consistency: number
   is_winner: boolean
 }
 
@@ -107,14 +115,17 @@ export interface UpdateMetaStrategyRequest {
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
-  metrics: { sharpe: 0.35, win_rate: 0.25, profit_factor: 0.25, max_drawdown: 0.15 },
-  evaluation_window_days: 30,
+  metrics: {
+    sharpe: 0.20, win_rate: 0.15, profit_factor: 0.15, max_drawdown: 0.10,
+    confidence: 0.10, expected_value: 0.10, signal_strength: 0.10, consistency: 0.10,
+  },
 }
 
 export const DEFAULT_PROMOTION_CONFIG: PromotionConfig = {
   interval: 'daily',
   interval_days: null,
   probation_hours: 48,
+  evaluation_window_days: 30,
 }
 
 export const DEFAULT_CONFLUENCE_CONFIG: ConfluenceConfig = {

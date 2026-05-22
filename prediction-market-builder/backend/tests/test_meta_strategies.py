@@ -38,10 +38,9 @@ class TestMetaStrategyAPI:
             "mode": "confluence",
             "consumer": "paper_trading",
             "scoring_config": {
-                "metrics": {"sharpe": 0.5, "win_rate": 0.3, "profit_factor": 0.1, "max_drawdown": 0.1},
-                "evaluation_window_days": 60,
+                "metrics": {"sharpe": 0.5, "win_rate": 0.3, "profit_factor": 0.1, "max_drawdown": 0.1, "confidence": 0.0, "expected_value": 0.0, "signal_strength": 0.0, "consistency": 0.0},
             },
-            "promotion_config": {"interval": "weekly", "probation_hours": 72},
+            "promotion_config": {"interval": "weekly", "probation_hours": 72, "evaluation_window_days": 60},
             "confluence_config": {"threshold": 2, "source": "top_n", "from_top": 3, "manual_strategy_ids": []},
         })
         assert resp.status_code == 200
@@ -49,6 +48,7 @@ class TestMetaStrategyAPI:
         assert data["consumer"] == "paper_trading"
         assert data["scoring_config"]["metrics"]["sharpe"] == 0.5
         assert data["promotion_config"]["interval"] == "weekly"
+        assert data["promotion_config"]["evaluation_window_days"] == 60
         assert data["confluence_config"]["threshold"] == 2
 
     @pytest.mark.asyncio

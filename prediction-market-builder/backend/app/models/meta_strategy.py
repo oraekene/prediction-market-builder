@@ -14,14 +14,17 @@ class MetaStrategyMode(str, enum.Enum):
 
 
 DEFAULT_SCORING_CONFIG = {
-    "metrics": {"sharpe": 0.35, "win_rate": 0.25, "profit_factor": 0.25, "max_drawdown": 0.15},
-    "evaluation_window_days": 30,
+    "metrics": {
+        "sharpe": 0.20, "win_rate": 0.15, "profit_factor": 0.15, "max_drawdown": 0.10,
+        "confidence": 0.10, "expected_value": 0.10, "signal_strength": 0.10, "consistency": 0.10,
+    },
 }
 
 DEFAULT_PROMOTION_CONFIG = {
     "interval": "daily",
     "interval_days": None,
     "probation_hours": 48,
+    "evaluation_window_days": 30,
 }
 
 DEFAULT_CONFLUENCE_CONFIG = {
