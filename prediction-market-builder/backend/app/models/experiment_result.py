@@ -26,6 +26,7 @@ class ExperimentResult(Base):
     tabpfn_probability: Mapped[float] = mapped_column(Float, default=0.0)
     tabpfn_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     composite_score: Mapped[float] = mapped_column(Float, default=0.0)
+    shap_explanation: Mapped[dict] = mapped_column(JSON, nullable=True)
     verdict: Mapped[str] = mapped_column(String, default="REVERTED")
     git_commit_hash: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

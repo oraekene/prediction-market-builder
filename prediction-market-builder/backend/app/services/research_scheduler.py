@@ -16,6 +16,7 @@ from app.ai.autoresearch import AutoresearchService
 from app.ai.tabpfn_service import TabPFNService
 from app.ai.market_regime_service import MarketRegimeService
 from app.ai.rlm_service import RLMService
+from app.services.explainability_service import ExplainabilityService
 from app.services.backtester import SimulatedMarketHistory
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,13 @@ class ResearchScheduler:
         tabpfn: TabPFNService | None = None,
         market_regime: MarketRegimeService | None = None,
         rlm: RLMService | None = None,
+        explainability: ExplainabilityService | None = None,
     ):
         self.autoresearch = autoresearch or AutoresearchService(tabpfn_service=tabpfn)
         self.tabpfn = tabpfn or TabPFNService()
         self.market_regime = market_regime or MarketRegimeService()
         self.rlm = rlm or RLMService()
+        self.explainability = explainability
 
         self._sessions: dict[str, asyncio.Task] = {}
         self._user_locks: dict[str, asyncio.Semaphore] = {}
@@ -224,9 +227,19 @@ class ResearchScheduler:
 
     async def _run_single_iteration(self, session: ResearchSession, db: AsyncSession) -> None:
         climate = await self.market_regime.assess_climate([])
-        feature_importance = await self.tabpfn.get_feature_importance(
-            _empty_feature_df()
+
+        tabpfn_feature_columns = [
+            "odds", "volume", "liquidity", "spread",
+            "participants", "hypothesis_threshold",
+            "volatility", "autocorrelation",
+        ]
+        import pandas as pd
+        dummy_features = pd.DataFrame(
+            [[0.5, 0.5, 0.5, 0.05, 0.5, 0.5, 0.5, 0.0]],
+            columns=tabpfn_feature_columns,
         )
+        feature_importance = await self.tabpfn.get_feature_importance(dummy_features)
+
         alpha_vector = await self._get_alpha_vector(session.rlm_alpha_vector_id)
 
         past_results = await self._get_past_results(session.id)
@@ -262,6 +275,17 @@ class ResearchScheduler:
             await db.commit()
             return
 
+        shap_explanation = None
+        tabpfn_features = result_dict.get("tabpfn_features")
+        if tabpfn_features and self.explainability and self.explainability.available:
+            try:
+                shap_explanation = await self.explainability.explain_tabpfn_features(
+                    tabpfn_features
+                )
+            except Exception as exc:
+                logger.warning("SHAP explain failed for iteration %d: %s",
+                               session.current_iteration + 1, exc)
+
         experiment = ExperimentResult(
             session_id=session.id,
             iteration=session.current_iteration + 1,
@@ -280,6 +304,7 @@ class ResearchScheduler:
             tabpfn_probability=result_dict.get("tabpfn_probability", 0.0),
             tabpfn_confidence=result_dict.get("tabpfn_confidence", 0.0),
             composite_score=result_dict.get("composite_score", 0.0),
+            shap_explanation=shap_explanation,
             verdict=result_dict.get("verdict", "REVERTED"),
             git_commit_hash=result_dict.get("git_commit_hash"),
         )
@@ -301,6 +326,20 @@ class ResearchScheduler:
         session.tabpfn_top_features = feature_importance
         await db.commit()
 
+        shap_summary = None
+        if shap_explanation:
+            contributions = shap_explanation.get("contributions", [])
+            top_3 = sorted(
+                contributions,
+                key=lambda c: abs(c.get("shap_value", 0)),
+                reverse=True,
+            )[:3]
+            shap_summary = {
+                "base_value": shap_explanation.get("base_value"),
+                "output_value": shap_explanation.get("output_value"),
+                "top_features": top_3,
+            }
+
         await self._broadcast_event(session.id, {
             "type": "iteration_complete",
             "session_id": session.id,
@@ -310,6 +349,7 @@ class ResearchScheduler:
             "sharpe": experiment.backtest_sharpe,
             "win_rate": experiment.backtest_win_rate,
             "verdict": experiment.verdict,
+            "shap_summary": shap_summary,
         })
 
     async def _get_user_config(self, user_id: str) -> ResearchSessionConfig | None:
@@ -404,8 +444,3 @@ class ResearchScheduler:
 
 def mode_is_manual(mode: SessionMode) -> bool:
     return mode == SessionMode.MANUAL
-
-
-def _empty_feature_df():
-    import pandas as pd
-    return pd.DataFrame()

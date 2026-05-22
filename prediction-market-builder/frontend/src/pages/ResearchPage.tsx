@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   fetchResearchSessions,
   fetchResearchStats,
@@ -10,10 +10,12 @@ import {
   fetchClimate,
   fetchAlphaVectors,
   triggerRlmScan,
+  fetchShapExplanation,
 } from '@/lib/api'
 import { useResearchWebSocket } from '@/hooks/useResearchWebSocket'
 import { cn } from '@/lib/utils'
 import { IterationChart } from '@/components/research/IterationChart'
+import ShapPanel from '@/components/explainability/ShapPanel'
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -30,6 +32,8 @@ export default function ResearchPage() {
   const [alphaVectors, setAlphaVectors] = useState<any[]>([])
   const [activeIteration, setActiveIteration] = useState<any>(null)
   const [running, setRunning] = useState(false)
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null)
+  const [selectedExplanation, setSelectedExplanation] = useState<any>(null)
 
   useEffect(() => {
     loadData()
@@ -54,9 +58,10 @@ export default function ResearchPage() {
   }
 
   const wsHandlers: Record<string, (data: any) => void> = useMemo(() => ({
-    iteration_complete(_data: any) {
-      setActiveIteration(null)
+    iteration_complete(data: any) {
+      setActiveIteration({ shap_summary: data.shap_summary || null })
       setRunning(false)
+      setTimeout(() => setActiveIteration(null), 6000)
       loadData()
       if (selectedSession) {
         fetchResearchResults(selectedSession, 20).then(r => setResults(r.results)).catch(() => {})
@@ -115,10 +120,27 @@ export default function ResearchPage() {
 
   async function selectSession(id: string) {
     setSelectedSession(id)
+    setSelectedResultId(null)
+    setSelectedExplanation(null)
     try {
       const r = await fetchResearchResults(id, 50)
       setResults(r.results)
     } catch { /* ignore */ }
+  }
+
+  async function handleResultClick(resultId: string) {
+    if (selectedResultId === resultId) {
+      setSelectedResultId(null)
+      setSelectedExplanation(null)
+      return
+    }
+    setSelectedResultId(resultId)
+    try {
+      const resp = await fetchShapExplanation(resultId)
+      setSelectedExplanation(resp.explanation)
+    } catch {
+      setSelectedExplanation(null)
+    }
   }
 
   return (
@@ -194,6 +216,11 @@ export default function ResearchPage() {
                     </span>
                   </div>
                 )}
+                {activeIteration.shap_summary && (
+                  <div className="mt-2">
+                    <ShapPanel explanation={activeIteration.shap_summary} compact />
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-sm text-gray-500">No active iteration</p>
@@ -222,18 +249,35 @@ export default function ResearchPage() {
                   </thead>
                   <tbody>
                     {results.slice().reverse().map((r) => (
-                      <tr key={r.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                        <td className="px-3 py-2 text-gray-400">{r.iteration}</td>
-                        <td className="max-w-[200px] truncate px-3 py-2 text-white">{r.hypothesis}</td>
-                        <td className="px-3 py-2 text-gray-400">{r.regime_at_time || '-'}</td>
-                        <td className="px-3 py-2 font-mono text-white">{r.composite_score.toFixed(3)}</td>
-                        <td className="px-3 py-2 font-mono text-blue-400">{r.backtest_sharpe.toFixed(3)}</td>
-                        <td className="px-3 py-2 font-mono">{(r.backtest_win_rate * 100).toFixed(0)}%</td>
-                        <td className="px-3 py-2 font-mono">{(r.tabpfn_probability * 100).toFixed(0)}%</td>
-                        <td className="px-3 py-2">
-                          <VerdictBadge verdict={r.verdict} />
-                        </td>
-                      </tr>
+                      <React.Fragment key={r.id}>
+                        <tr
+                          onClick={() => handleResultClick(r.id)}
+                          className={cn(
+                            'cursor-pointer border-b border-gray-800 transition-colors',
+                            selectedResultId === r.id
+                              ? 'bg-blue-900/20'
+                              : 'hover:bg-gray-800/50',
+                          )}
+                        >
+                          <td className="px-3 py-2 text-gray-400">{r.iteration}</td>
+                          <td className="max-w-[200px] truncate px-3 py-2 text-white">{r.hypothesis}</td>
+                          <td className="px-3 py-2 text-gray-400">{r.regime_at_time || '-'}</td>
+                          <td className="px-3 py-2 font-mono text-white">{r.composite_score.toFixed(3)}</td>
+                          <td className="px-3 py-2 font-mono text-blue-400">{r.backtest_sharpe.toFixed(3)}</td>
+                          <td className="px-3 py-2 font-mono">{(r.backtest_win_rate * 100).toFixed(0)}%</td>
+                          <td className="px-3 py-2 font-mono">{(r.tabpfn_probability * 100).toFixed(0)}%</td>
+                          <td className="px-3 py-2">
+                            <VerdictBadge verdict={r.verdict} />
+                          </td>
+                        </tr>
+                        {selectedResultId === r.id && (
+                          <tr>
+                            <td colSpan={8} className="px-3 py-3">
+                              <ShapPanel explanation={selectedExplanation} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>

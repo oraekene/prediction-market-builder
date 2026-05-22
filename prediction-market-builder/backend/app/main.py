@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from sqlalchemy import select
 from app.database import engine, create_tables
-from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies
+from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies, explainability
 from app.routers.auth import get_current_user
 from app.services.research_scheduler import ResearchScheduler
 from app.services.market_aggregator import MarketAggregator
@@ -26,6 +26,8 @@ from app.ai.tool_registry import ToolRegistry, registry as tool_registry
 from app.ai.agent_spawner import AgentSpawner
 from app.ai.git_manager import GitManager
 from app.ai.repl_service import REPLService
+from app.ai.shap_explainer import ShapExplainer
+from app.services.explainability_service import ExplainabilityService
 from app.ai.alchemy_service import AlchemyService, AlchemyRequest, ConnectionEngine
 from app.ai.domain_providers import DomainRegistry
 from app.ai.domain_providers.market_provider import MarketDomainProvider
@@ -42,11 +44,17 @@ tabpfn = TabPFNService()
 market_regime = MarketRegimeService()
 rlm = RLMService()
 autoresearch = AutoresearchService(tabpfn_service=tabpfn)
+shap_explainer = ShapExplainer()
+explainability_service = ExplainabilityService(
+    shap_explainer=shap_explainer,
+    tabpfn_service=tabpfn,
+)
 scheduler = ResearchScheduler(
     autoresearch=autoresearch,
     tabpfn=tabpfn,
     market_regime=market_regime,
     rlm=rlm,
+    explainability=explainability_service,
 )
 
 hermes = HermesSidecar()
@@ -143,12 +151,14 @@ async def lifespan(app: FastAPI):
     git_manager.init_repo()
     await create_tables()
     await _migrate_passwords()
+    await explainability_service.initialize()
 
     _register_rlm_tools(tool_registry, rlm)
     _register_repl_tools(tool_registry, repl_service)
     if alchemy_service is not None:
         _register_alchemy_tools(tool_registry, alchemy_service)
         alchemy.init_alchemy(alchemy_service)
+    explainability.init_explainability(explainability_service)
     scheduler.set_broadcast(research.broadcast_to_session)
     research.init_scheduler(scheduler)
     orchestrator.init_orchestrator(orchestrator_instance, watchdog, skill_creator)
@@ -303,6 +313,7 @@ app.include_router(risk_templates.router, dependencies=[Depends(get_current_user
 app.include_router(trades.router, dependencies=[Depends(get_current_user)])
 app.include_router(paper_trading.router, dependencies=[Depends(get_current_user)])
 app.include_router(meta_strategies.router, dependencies=[Depends(get_current_user)])
+app.include_router(explainability.router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")

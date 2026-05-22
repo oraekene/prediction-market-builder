@@ -260,3 +260,27 @@ export async function fetchMetaPerformance(msId: string): Promise<any> {
   if (!res.ok) throw new Error('Failed to fetch meta performance')
   return res.json()
 }
+
+export async function fetchShapExplanation(resultId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/explainability/${resultId}`)
+  if (!res.ok) throw new Error('Failed to fetch SHAP explanation')
+  return res.json()
+}
+
+export async function fetchShapSessionAggregate(sessionId: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/explainability/session/${sessionId}/aggregate`)
+  if (!res.ok) throw new Error('Failed to fetch SHAP session aggregate')
+  return res.json()
+}
+
+export async function explainFeatures(
+  features: Record<string, number>,
+  regimeVector?: number[],
+): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/explainability/explain`, {
+    method: 'POST',
+    body: JSON.stringify({ features, regime_vector: regimeVector }),
+  })
+  if (!res.ok) throw new Error('Failed to explain features')
+  return res.json()
+}

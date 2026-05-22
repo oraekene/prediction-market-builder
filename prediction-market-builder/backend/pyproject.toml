@@ -28,6 +28,7 @@ dependencies = [
     "safetensors>=0.4.0",
     "lightgbm>=4.0.0",
     "scikit-learn>=1.4.0",
+    "shap>=0.46.0",
     "faiss-cpu>=1.8.0",
     "scrapling>=0.4.0",
     "matplotlib>=3.8.0",

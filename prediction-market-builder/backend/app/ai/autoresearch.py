@@ -154,6 +154,7 @@ class AutoresearchService:
             "backtest_total_pnl": round(mc_result.mean_total_pnl, 2),
             "tabpfn_probability": tabpfn_result.get("probability", 0.5),
             "tabpfn_confidence": tabpfn_result.get("confidence", 0.0),
+            "tabpfn_features": tabpfn_features,
             "composite_score": round(composite_score, 4),
             "verdict": verdict,
             "git_commit_hash": git_commit_hash,

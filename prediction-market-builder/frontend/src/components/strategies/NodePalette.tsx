@@ -21,11 +21,11 @@ const performanceItems: { label: string; metric: string }[] = [
 
 const nodeCategories: { category: string; items: string[] }[] = [
   { category: 'Sources', items: ['Polymarket', 'Kalshi', 'Drift', 'Web Search', 'News'] },
-  { category: 'Filters', items: ['TabPFN Signal', 'Toto-2 Climate', 'Sentiment'] },
+  { category: 'Filters', items: ['TabPFN Signal', 'Toto-2 Climate', 'Sentiment', 'SHAP Feature Importance'] },
   { category: 'Conditions', items: ['Threshold', 'Time-Based', 'AND/OR', 'Branch'] },
   { category: 'Actions', items: ['Place Bet', 'Send Alert', 'Forward', 'Webhook'] },
   { category: 'Risk', items: ['Kelly Criterion', 'Stop-Loss', 'Drawdown'] },
-  { category: 'Analysis', items: ['Bayesian Inference', 'Monte Carlo', 'Backtest'] },
+  { category: 'Analysis', items: ['Bayesian Inference', 'Monte Carlo', 'Backtest', 'SHAP Explainability'] },
 ]
 
 export default function NodePalette() {
