@@ -159,6 +159,15 @@ async def lifespan(app: FastAPI):
         _register_alchemy_tools(tool_registry, alchemy_service)
         alchemy.init_alchemy(alchemy_service)
     explainability.init_explainability(explainability_service)
+    strategies.init_strategy_engine(
+        strategy_engine=strategy_engine,
+        tabpfn=tabpfn,
+        market_regime=market_regime,
+        explainability_service=explainability_service,
+        hermes=hermes,
+        rlm=rlm,
+        market_aggregator=market_aggregator,
+    )
     scheduler.set_broadcast(research.broadcast_to_session)
     research.init_scheduler(scheduler)
     orchestrator.init_orchestrator(orchestrator_instance, watchdog, skill_creator)

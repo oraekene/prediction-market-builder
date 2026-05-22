@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import re
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,8 @@ class RLMService:
         files = self._discover_files(directory, file_pattern)
         total_tokens = 0
         scan_results: list[dict[str, Any]] = []
+        sub_agent_invocations = []
+        keyword_matches = []
 
         for fpath in files:
             if not self._consume_token_budget(0):
@@ -220,12 +223,24 @@ class RLMService:
             if keywords and not self._keyword_match(content, keywords):
                 continue
 
+            kw_found = [kw for kw in (keywords or []) if kw.lower() in content.lower()]
+            if kw_found:
+                keyword_matches.append({"file": fpath, "keywords": kw_found})
+
             if self.check_available() and spawn_sub_agents and tokens > 50_000:
+                sub_start = time.time()
                 sub_result = await self.spawn_sub_agent(
                     document=content,
                     instruction=f"Extract all alpha signals related to {keywords or 'any market pattern'}. Return structured findings.",
                     sub_lm=sub_lm,
                 )
+                sub_duration = int((time.time() - sub_start) * 1000)
+                sub_agent_invocations.append({
+                    "file": fpath,
+                    "tokens": tokens,
+                    "duration_ms": sub_duration,
+                    "result_preview": str(sub_result)[:500],
+                })
                 scan_results.append({
                     "file": fpath,
                     "source_hash": self.compute_source_hash(fpath),
@@ -246,6 +261,17 @@ class RLMService:
             if not self._consume_token_budget(tokens):
                 break
 
+        self._accumulated_state.append({
+            "stage": "scan",
+            "directory": directory,
+            "files_discovered": len(files),
+            "files_matched": len(scan_results),
+            "token_usage": total_tokens,
+            "keyword_matches": keyword_matches[:50],
+            "sub_agent_calls": sub_agent_invocations,
+            "budget_remaining": self._token_budget,
+        })
+
         if self.check_available() and scan_results:
             try:
                 synthesis = await self._dspy_call(
@@ -260,6 +286,13 @@ class RLMService:
                 alpha = self._build_alpha_from_results(scan_results)
         else:
             alpha = self._build_alpha_from_results(scan_results)
+
+        self._accumulated_state.append({
+            "stage": "synthesis",
+            "method": "dspy_rlm" if (self.check_available() and scan_results) else "fallback",
+            "files_synthesized": len(scan_results),
+            "dspy_trajectory": self._last_trajectory,
+        })
 
         return {
             "alpha_vector": alpha,
@@ -358,6 +391,17 @@ class RLMService:
 
         entities_with_drift = [e for e, s in drift_scores.items() if abs(s.get("drift_score", 0)) > 0.05]
         top_drift = sorted(entities_with_drift, key=lambda e: abs(drift_scores[e]["drift_score"]), reverse=True)[:5]
+
+        self._accumulated_state.append({
+            "stage": "drift_detection",
+            "historical_docs": len(texts_historical),
+            "recent_docs": len(texts_recent),
+            "entities_analyzed": len(target_entities),
+            "entities_with_drift": len(entities_with_drift),
+            "top_drift_entities": top_drift,
+            "method": "embedding+dspy" if (self.check_available() and use_dspy) else "embedding",
+            "dspy_trajectory": self._last_trajectory,
+        })
 
         return {
             "drift_scores": drift_scores,

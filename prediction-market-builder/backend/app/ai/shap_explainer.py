@@ -62,10 +62,12 @@ class ShapExplainer:
             df = pd.DataFrame(X, columns=feature_names)
             return model_fn(df)
 
-        self._explainer = shap.KernelExplainer(
+        import shap.maskers
+        masker = shap.maskers.Independent(self._background.values, max_samples=100)
+        self._explainer = shap.PermutationExplainer(
             predict_fn,
-            self._background.values,
-            link="identity",
+            masker,
+            feature_names=feature_names,
         )
 
     @property
@@ -102,7 +104,7 @@ class ShapExplainer:
         df = df[self._feature_names]
 
         try:
-            shap_values = self._explainer.shap_values(df.values, silent=True)
+            shap_values = self._explainer(df.values)
         except Exception as exc:
             logger.warning("SHAP explain failed: %s", exc)
             return self._empty_explanation(features)

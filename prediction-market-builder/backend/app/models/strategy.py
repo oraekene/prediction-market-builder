@@ -25,5 +25,7 @@ class Strategy(Base):
     nodes: Mapped[list] = mapped_column(JSON, default=list)
     edges: Mapped[list] = mapped_column(JSON, default=list)
     risk_profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(default=1)
+    version_history: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

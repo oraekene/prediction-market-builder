@@ -7,6 +7,8 @@ from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from fastapi import Query
+
 from app.ai.hermes_orchestrator import HermesOrchestrator
 from app.ai.skill_creator import SkillCreator
 from app.ai.watchdog import WatchdogService
@@ -135,6 +137,14 @@ async def list_agents(session_id: str = Query("default")):
         return {"agents": []}
     agents = _orchestrator.agent_spawner.list_active_agents(parent_session_id=session_id)
     return {"agents": agents}
+
+
+@router.get("/traces/{session_id}")
+async def get_traces(session_id: str = "default", limit: int = Query(50)):
+    if not _orchestrator:
+        return {"traces": []}
+    traces = _orchestrator.get_traces(session_id, limit=limit)
+    return {"traces": traces}
 
 
 @router.get("/goals")

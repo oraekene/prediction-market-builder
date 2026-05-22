@@ -6,6 +6,7 @@ from app.models.template import StrategyTemplate
 from app.models.research_session import ResearchSession, SessionStatus, SessionMode, CompositePreset
 from app.models.experiment_result import ExperimentResult
 from app.models.rlm_alpha_vector import RLMAlphaVector
+from app.models.hermes_trace import HermesTrace
 from app.models.research_config import ResearchSessionConfig
 from app.models.meta_strategy import MetaStrategy, MetaStrategyMode
 
@@ -16,4 +17,5 @@ __all__ = [
     "ResearchSession", "SessionStatus", "SessionMode", "CompositePreset",
     "ExperimentResult", "RLMAlphaVector", "ResearchSessionConfig",
     "MetaStrategy", "MetaStrategyMode",
+    "HermesTrace",
 ]

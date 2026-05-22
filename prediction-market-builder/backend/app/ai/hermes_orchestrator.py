@@ -91,6 +91,7 @@ class HermesOrchestrator:
         self._lock = asyncio.Lock()
         self._max_retries = 3
         self._cognitive_goals: dict[str, list[dict[str, Any]]] = {}
+        self._traces: dict[str, list[dict[str, Any]]] = {}
         self._on_strategy_created: list[Callable] = []
         self._on_skill_created: list[Callable] = []
         self._on_pipeline_complete: list[Callable] = []
@@ -159,6 +160,8 @@ class HermesOrchestrator:
             self._state[session_id] = OrchestratorState.PROCESSING
 
         try:
+            start_time = time.time()
+
             intent = await self._classify_intent(message, session_id)
             logger.info("Session %s intent: %s", session_id, intent.value)
 
@@ -191,6 +194,24 @@ class HermesOrchestrator:
                         logger.warning("Pipeline complete handler failed: %s", exc)
 
             await self._store_interaction(session_id, message, result, intent)
+
+            latency_ms = int((time.time() - start_time) * 1000)
+            trace_entry = {
+                "session_id": session_id,
+                "intent": intent.value,
+                "prompt": f"Message: {message}\nMemory: {memory_context[:500] if memory_context else 'none'}\nHierarchical: {hierarchical_context[:500] if hierarchical_context else 'none'}",
+                "response": str(result.get("response", result.get("error", str(result))))[:2000],
+                "model": "hermes-sidecar",
+                "latency_ms": latency_ms,
+                "tool_calls_attempted": list(self.tool_registry.tools.keys()) if hasattr(self.tool_registry, 'tools') else [],
+                "tool_results": [],
+                "classification_chain": [{"intent": intent.value, "confidence": 1.0}],
+            }
+            if session_id not in self._traces:
+                self._traces[session_id] = []
+            self._traces[session_id].append(trace_entry)
+            if len(self._traces[session_id]) > 200:
+                self._traces[session_id] = self._traces[session_id][-200:]
 
             async with self._lock:
                 self._state[session_id] = OrchestratorState.IDLE
@@ -781,6 +802,10 @@ class HermesOrchestrator:
             "type": "service_unavailable",
             "response": f"The {service_name} is not configured. This feature requires additional setup.",
         }
+
+    def get_traces(self, session_id: str = "default", limit: int = 50) -> list[dict[str, Any]]:
+        traces = self._traces.get(session_id, [])
+        return traces[-limit:]
 
     async def get_session_summary(self, session_id: str = "default") -> dict[str, Any]:
         session = self._sessions.get(session_id, {})

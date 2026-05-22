@@ -1,11 +1,19 @@
-from typing import Any, Callable
+import asyncio
+import inspect
+from typing import Any, Callable, Awaitable
+
+
+NodeHandler = Callable[..., Any] | Callable[..., Awaitable[Any]]
 
 
 class ExecutionContext:
     def __init__(self, market: dict | None = None, signal: dict | None = None,
                  portfolio: dict | None = None, risk_calculator=None,
                  portfolio_manager=None, tabpfn=None,
-                 performance_snapshot: dict | None = None):
+                 performance_snapshot: dict | None = None,
+                 explainability_service=None, hermes=None, rlm=None,
+                 market_regime=None, market_aggregator=None,
+                 chromadb_manager=None):
         self.market = market or {}
         self.signal = signal or {}
         self.portfolio = portfolio or {}
@@ -13,9 +21,12 @@ class ExecutionContext:
         self.portfolio_manager = portfolio_manager
         self.tabpfn = tabpfn
         self.performance_snapshot = performance_snapshot or {}
-
-
-NodeHandler = Callable[[dict, dict[str, Any], ExecutionContext], Any]
+        self.explainability_service = explainability_service
+        self.hermes = hermes
+        self.rlm = rlm
+        self.market_regime = market_regime
+        self.market_aggregator = market_aggregator
+        self.chromadb_manager = chromadb_manager
 
 
 class NodeRegistry:
@@ -33,7 +44,7 @@ class GraphExecutor:
     def __init__(self, registry: NodeRegistry):
         self.registry = registry
 
-    def execute(self, nodes: list, edges: list, context: ExecutionContext) -> dict[str, Any]:
+    async def execute(self, nodes: list, edges: list, context: ExecutionContext) -> dict[str, Any]:
         if not nodes:
             return {"approved": True, "suggested_size": 0.0, "violations": []}
 
@@ -63,7 +74,10 @@ class GraphExecutor:
             handler = self.registry.get(node["type"])
             if handler:
                 try:
-                    outputs[nid] = handler(node, node_inputs, context)
+                    if inspect.iscoroutinefunction(handler):
+                        outputs[nid] = await handler(node, node_inputs, context)
+                    else:
+                        outputs[nid] = handler(node, node_inputs, context)
                 except Exception as e:
                     outputs[nid] = {"error": str(e)}
             else:

@@ -388,6 +388,9 @@ async def trigger_rlm_scan(
         source_hash=rlm_service.compute_source_hash(source_path or "./data/archives"),
         token_count=result.get("token_estimate", 0),
         alpha_vector=result.get("alpha_vector", {}),
+        sub_agent_traces=rlm_service.get_accumulated_state(),
+        traces=rlm_service.get_accumulated_state(),
+        dspy_trajectory=rlm_service.inspect_last_trajectory(),
     )
     db.add(alpha_vector)
     await db.commit()
@@ -449,6 +452,9 @@ async def trigger_rlm_pipeline(
         token_count=result.get("scan", {}).get("token_estimate", 0),
         alpha_vector=result.get("alpha_vector", {}),
         linguistic_signals=result.get("drift"),
+        sub_agent_traces=rlm_service.get_accumulated_state(),
+        traces=rlm_service.get_accumulated_state(),
+        dspy_trajectory=rlm_service.inspect_last_trajectory(),
     )
     db.add(alpha_vector)
     await db.commit()
@@ -472,6 +478,26 @@ async def get_rlm_trajectory():
 async def get_rlm_accumulated_state():
     state = rlm_service.get_accumulated_state()
     return {"state": state, "count": len(state)}
+
+
+@router.get("/rlm/trace/{vector_id}")
+async def get_rlm_trace(vector_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(RLMAlphaVector).where(RLMAlphaVector.id == vector_id)
+    )
+    vector = result.scalar_one_or_none()
+    if not vector:
+        raise HTTPException(status_code=404, detail="RLM alpha vector not found")
+    return {
+        "id": vector.id,
+        "source_type": vector.source_type,
+        "source_path": vector.source_path,
+        "alpha_vector": vector.alpha_vector,
+        "linguistic_signals": vector.linguistic_signals,
+        "sub_agent_traces": vector.sub_agent_traces,
+        "traces": vector.traces,
+        "dspy_trajectory": vector.dspy_trajectory,
+    }
 
 
 @router.websocket("/ws/research/{session_id}")

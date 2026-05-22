@@ -1,13 +1,39 @@
+from datetime import datetime, timezone
+from copy import deepcopy
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 
 from app.database import get_session
-from app.models.strategy import Strategy
+from app.models.strategy import Strategy, StrategyStatus
 from app.models.template import StrategyTemplate
+from app.services.node_executor import ExecutionContext
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
+
+_strategy_engine = None
+_tabpfn = None
+_market_regime = None
+_explainability_service = None
+_hermes = None
+_rlm = None
+_market_aggregator = None
+
+
+def init_strategy_engine(strategy_engine, tabpfn=None, market_regime=None,
+                         explainability_service=None, hermes=None, rlm=None,
+                         market_aggregator=None):
+    global _strategy_engine, _tabpfn, _market_regime, _explainability_service
+    global _hermes, _rlm, _market_aggregator
+    _strategy_engine = strategy_engine
+    _tabpfn = tabpfn
+    _market_regime = market_regime
+    _explainability_service = explainability_service
+    _hermes = hermes
+    _rlm = rlm
+    _market_aggregator = market_aggregator
 
 
 class CreateStrategyRequest(BaseModel):
@@ -189,3 +215,149 @@ async def delete_strategy(strategy_id: str, session: AsyncSession = Depends(get_
     await session.delete(strategy)
     await session.commit()
     return {"status": "deleted"}
+
+
+@router.post("/{strategy_id}/deploy")
+async def deploy_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if strategy.status == StrategyStatus.ACTIVE:
+        return strategy
+    _save_version_snapshot(strategy)
+    strategy.status = StrategyStatus.ACTIVE
+    strategy.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(strategy)
+    return strategy
+
+
+@router.post("/{strategy_id}/pause")
+async def pause_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if strategy.status != StrategyStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="Only active strategies can be paused")
+    _save_version_snapshot(strategy)
+    strategy.status = StrategyStatus.PAUSED
+    strategy.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(strategy)
+    return strategy
+
+
+@router.post("/{strategy_id}/resume")
+async def resume_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if strategy.status != StrategyStatus.PAUSED:
+        raise HTTPException(status_code=400, detail="Only paused strategies can be resumed")
+    _save_version_snapshot(strategy)
+    strategy.status = StrategyStatus.ACTIVE
+    strategy.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(strategy)
+    return strategy
+
+
+@router.post("/{strategy_id}/archive")
+async def archive_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if strategy.status == StrategyStatus.ARCHIVED:
+        return strategy
+    _save_version_snapshot(strategy)
+    strategy.status = StrategyStatus.ARCHIVED
+    strategy.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(strategy)
+    return strategy
+
+
+@router.post("/{strategy_id}/rollback")
+async def rollback_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if not strategy.version_history:
+        raise HTTPException(status_code=400, detail="No previous version to rollback to")
+    prev = strategy.version_history[-1]
+    strategy.nodes = prev.get("nodes", strategy.nodes)
+    strategy.edges = prev.get("edges", strategy.edges)
+    strategy.risk_profile = prev.get("risk_profile", strategy.risk_profile)
+    strategy.version = max(1, strategy.version - 1)
+    strategy.version_history = strategy.version_history[:-1]
+    strategy.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(strategy)
+    return strategy
+
+
+@router.get("/{strategy_id}/history")
+async def get_strategy_history(strategy_id: str, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return {
+        "current_version": strategy.version,
+        "history": strategy.version_history,
+    }
+
+
+def _save_version_snapshot(strategy: Strategy) -> None:
+    snapshot = {
+        "version": strategy.version,
+        "status": strategy.status.value,
+        "nodes": deepcopy(strategy.nodes),
+        "edges": deepcopy(strategy.edges),
+        "risk_profile": deepcopy(strategy.risk_profile),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    history = list(strategy.version_history or [])
+    history.append(snapshot)
+    strategy.version_history = history
+    strategy.version = (strategy.version or 1) + 1
+
+
+class EvaluateStrategyRequest(BaseModel):
+    nodes: list = []
+    edges: list = []
+    market_id: str | None = None
+    market: dict | None = None
+
+
+@router.post("/evaluate")
+async def evaluate_strategy(data: EvaluateStrategyRequest):
+    if not _strategy_engine:
+        raise HTTPException(status_code=503, detail="Strategy engine not initialized")
+
+    from app.data.chromadb_manager import ChromaDBManager
+
+    market = data.market or {}
+    if data.market_id and _market_aggregator:
+        markets = await _market_aggregator.fetch_all()
+        for m in markets:
+            if m.get("platform_market_id") == data.market_id or m.get("id") == data.market_id:
+                market = m
+                break
+
+    ctx = ExecutionContext(
+        market=market,
+        tabpfn=_tabpfn,
+        market_regime=_market_regime,
+        explainability_service=_explainability_service,
+        hermes=_hermes,
+        rlm=_rlm,
+        market_aggregator=_market_aggregator,
+        chromadb_manager=ChromaDBManager(),
+    )
+    return await _strategy_engine.evaluate(data.nodes, data.edges, ctx)

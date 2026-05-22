@@ -1,34 +1,102 @@
-"""Hermes-Agent sidecar integration.
+"""Hermes-Agent sidecar integration with tool calling.
 
 Wraps Nous Research's Hermes-Agent (oneshot API) as an importable module
-for the prediction market strategy builder. Falls back gracefully when
-Hermes is not configured (no API keys, no config.yaml).
+with tool-calling capability via ToolRegistry. Supports multi-turn
+tool-calling loops: LLM → tool call → execute → feed result → LLM.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class HermesSidecar:
-    """Lightweight wrapper around Hermes-Agent's internal _run_agent API.
+    """Hermes-Agent wrapper with tool-calling support.
 
     Manages per-user conversation history and graceful degradation when
-    Hermes is not configured. Uses Hermes-Agent's internal _run_agent
-    (which returns a response string) rather than run_oneshot (which
-    prints to stdout and returns an exit code).
+    Hermes is not configured. Supports tool-calling via ToolRegistry:
+    tool definitions are injected into the prompt, and structured tool
+    calls in the LLM response are parsed, executed, and fed back.
     """
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict | None = None, tool_registry=None):
         self._config = config or {}
         self._conversations: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._available: bool | None = None
+        self._tool_registry = tool_registry
+        self._max_tool_rounds = 5
+
+    def set_tool_registry(self, registry) -> None:
+        self._tool_registry = registry
+
+    async def get_tool_definitions(self) -> str:
+        """Format tool registry as a JSON tool-use prompt block."""
+        if not self._tool_registry:
+            return ""
+        try:
+            tools = self._tool_registry.list_tools() if hasattr(self._tool_registry, "list_tools") else []
+            if not tools:
+                return ""
+            lines = [
+                "You have access to the following tools. "
+                "When you want to call a tool, respond with a JSON block exactly like:",
+                '  {"tool": "tool_name", "args": {"arg1": "val1"}}',
+                "",
+                "Available tools:",
+            ]
+            for t in tools:
+                name = t.get("name", "?")
+                desc = t.get("description", "")
+                params = t.get("parameters", {})
+                param_desc = json.dumps(params) if params else "{}"
+                lines.append(f"  - {name}: {desc}  params: {param_desc}")
+            lines.append("")
+            lines.append(
+                "After the tool returns a result, continue the conversation. "
+                "You may call multiple tools sequentially."
+            )
+            return "\n".join(lines)
+        except Exception:
+            logger.exception("Failed to build tool definitions")
+            return ""
+
+    def _parse_tool_calls(self, text: str) -> list[dict]:
+        """Extract tool call JSON blocks from LLM response text."""
+        calls = []
+        pattern = r'\{\s*"tool"\s*:\s*"([^"]+)"\s*,\s*"args"\s*:\s*(\{.*?\})\s*\}'
+        for match in re.finditer(pattern, text, re.DOTALL):
+            try:
+                args = json.loads(match.group(2))
+                calls.append({"tool": match.group(1), "args": args})
+            except (json.JSONDecodeError, KeyError):
+                continue
+        return calls
+
+    def _strip_tool_calls_from_text(self, text: str) -> str:
+        return re.sub(r'\s*\{\s*"tool"\s*:\s*"[^"]+"\s*,\s*"args"\s*:\s*\{.*?\}\s*\}', "", text, flags=re.DOTALL)
+
+    async def _execute_tool_call(self, call: dict) -> str:
+        """Execute a single tool call and return a result summary."""
+        if not self._tool_registry:
+            return '{"error": "no tool registry configured"}'
+        try:
+            result = await self._tool_registry.execute(
+                tool_name=call["tool"],
+                **call["args"],
+            )
+            snippet = str(result)[:1500]
+            return json.dumps({"tool": call["tool"], "result": snippet})
+        except Exception as exc:
+            logger.warning("Tool call failed: %s | %s", call["tool"], exc)
+            return json.dumps({"tool": call["tool"], "error": str(exc)[:500]})
 
     def check_available(self) -> bool:
         try:
@@ -76,12 +144,17 @@ class HermesSidecar:
             "history_length": len(history),
         }
 
-    async def _build_prompt(self, user_id: str) -> str:
+    async def _build_prompt(self, user_id: str, include_tools: bool = True) -> str:
         async with self._lock:
             history = list(self._conversations.get(user_id, []))
+        tool_block = ""
+        if include_tools:
+            tool_block = await self.get_tool_definitions()
+            if tool_block:
+                tool_block = "\n[TOOLS]\n" + tool_block + "\n[/TOOLS]\n"
         if len(history) <= 1:
-            return history[0] if history else ""
-        lines = []
+            return tool_block + (history[0] if history else "")
+        lines = [tool_block] if tool_block else []
         for i, msg in enumerate(history):
             lines.append(f"[Message {i + 1}]: {msg}")
         lines.append(f"[Latest]: {history[-1]}")
@@ -91,11 +164,44 @@ class HermesSidecar:
         try:
             from hermes_cli.oneshot import _run_agent
 
-            prompt = await self._build_prompt(user_id)
-            response = await asyncio.to_thread(_run_agent, prompt=prompt)
+            raw_responses: list[str] = []
+            tool_calls_made: list[dict] = []
+
+            for turn in range(self._max_tool_rounds):
+                prompt = await self._build_prompt(user_id, include_tools=(turn == 0))
+                response = await asyncio.to_thread(_run_agent, prompt=prompt)
+                if not response:
+                    break
+
+                tool_calls = self._parse_tool_calls(response)
+                clean_text = self._strip_tool_calls_from_text(response)
+                raw_responses.append(clean_text)
+
+                if not tool_calls:
+                    all_tool_results = []
+                    break
+
+                tool_results = []
+                for call in tool_calls:
+                    result = await self._execute_tool_call(call)
+                    tool_results.append(result)
+                    tool_calls_made.append({"tool": call["tool"], "args": call["args"]})
+
+                tool_block = "\n".join(
+                    f"[TOOL RESULT: {json.loads(r).get('tool', '?')}]: {json.loads(r).get('result', json.loads(r).get('error', ''))}"  # noqa: E501
+                    for r in tool_results
+                )
+                async with self._lock:
+                    self._conversations[user_id].append(f"[Tool Results]:\n{tool_block}")
+            else:
+                all_tool_results = tool_calls_made
+
+            final_text = "\n".join(raw_responses)
             return {
                 "type": "hermes_response",
-                "response": response or "",
+                "response": final_text or "",
+                "tool_calls": tool_calls_made,
+                "num_tool_turns": len(raw_responses),
             }
         except ImportError as exc:
             logger.warning("Hermes-Agent not fully installed: %s", exc)

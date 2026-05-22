@@ -17,5 +17,6 @@ class RLMAlphaVector(Base):
     linguistic_signals: Mapped[dict] = mapped_column(JSON, nullable=True)
     sub_agent_traces: Mapped[dict] = mapped_column(JSON, nullable=True)
     dspy_trajectory: Mapped[str] = mapped_column(Text, nullable=True)
+    traces: Mapped[list] = mapped_column(JSON, nullable=True)
     used_in_sessions: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
