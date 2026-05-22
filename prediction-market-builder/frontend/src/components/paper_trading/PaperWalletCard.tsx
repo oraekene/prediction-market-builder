@@ -1,5 +1,4 @@
 ﻿import { usePaperWallet, useResetWallet } from '@/hooks/usePaperTrading'
-import { formatVolume } from '@/lib/utils'
 
 export default function PaperWalletCard() {
   const { data: wallet, isLoading, error } = usePaperWallet()
@@ -23,24 +22,24 @@ export default function PaperWalletCard() {
       <div className="grid grid-cols-3 gap-4">
         <div>
           <p className="text-xs text-gray-500">Balance</p>
-          <p className="text-2xl font-bold text-white"></p>
+          <p className="text-2xl font-bold text-white">${wallet.current_balance.toFixed(2)}</p>
         </div>
         <div>
           <p className="text-xs text-gray-500">P&L</p>
-          <p className={	ext-2xl font-bold }>
-            {wallet.pnl >= 0 ? '+' : ''}
+          <p className={`text-2xl font-bold ${wallet.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {wallet.pnl >= 0 ? '+' : ''}${wallet.pnl.toFixed(2)}
           </p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Return</p>
-          <p className={	ext-2xl font-bold }>
+          <p className={`text-2xl font-bold ${wallet.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             {wallet.pnl_pct >= 0 ? '+' : ''}{wallet.pnl_pct}%
           </p>
         </div>
       </div>
 
       <div className="mt-3 flex gap-4 text-xs text-gray-500">
-        <span>Initial: </span>
+        <span>Initial: ${wallet.initial_balance.toFixed(2)}</span>
         <span>Open positions: {wallet.open_positions.length}</span>
         <span>Trades: {wallet.recent_trades.length}</span>
       </div>

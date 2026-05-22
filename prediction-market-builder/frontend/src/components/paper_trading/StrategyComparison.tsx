@@ -40,25 +40,25 @@ export default function StrategyComparison() {
             <thead>
               <tr className="border-b border-gray-700 text-left text-xs uppercase text-gray-500">
                 <th className="px-2 py-1 font-medium">Metric</th>
-                {data.comparisons.map((c: any, i: number) => (
+                {data.comparisons.map((_: any, i: number) => (
                   <th key={i} className="px-2 py-1 font-medium">Strategy {i + 1}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {['total_trades', 'win_rate', 'total_pnl', 'sharpe_ratio', 'max_drawdown', 'profit_factor', 'avg_return'].map((metric) => (
+              {['total_trades', 'win_rate', 'total_pnl', 'edge', 'sharpe_ratio', 'avg_rr', 'kelly_optimal', 'max_drawdown', 'profit_factor', 'avg_return'].map((metric) => (
                 <tr key={metric} className="border-b border-gray-800">
                   <td className="px-2 py-1 text-gray-400 capitalize">{metric.replace('_', ' ')}</td>
                   {data.comparisons.map((c: any, i: number) => {
                     const val = c[metric]
-                    const display = metric === 'win_rate' || metric === 'max_drawdown'
-                      ? ${(val * 100).toFixed(1)}%
+                    const display = metric === 'win_rate' || metric === 'max_drawdown' || metric === 'kelly_optimal'
+                      ? `${(val * 100).toFixed(1)}%`
                       : metric === 'total_pnl' || metric === 'avg_return'
-                        ? $
+                        ? `$${val.toFixed(2)}`
                         : val.toFixed(2)
                     const isGood = metric === 'max_drawdown' ? val <= 0.1 : val >= 0
                     return (
-                      <td key={i} className={px-2 py-1 font-mono }>
+                      <td key={i} className={`px-2 py-1 font-mono ${isGood ? 'text-green-400' : 'text-red-400'}`}>
                         {display}
                       </td>
                     )

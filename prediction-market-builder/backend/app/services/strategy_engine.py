@@ -3,6 +3,7 @@ from app.services.node_executor import NodeRegistry, GraphExecutor, ExecutionCon
 from app.services.risk_calculator import RiskCalculator
 from app.services.portfolio_manager import PortfolioManager
 from app.services.risk_node_handlers import register_risk_handlers
+from app.services.performance_node_handlers import PERFORMANCE_HANDLERS
 
 
 _default_registry: NodeRegistry | None = None
@@ -14,6 +15,8 @@ def _get_registry() -> NodeRegistry:
         _default_registry = NodeRegistry()
         _default_registry.register("threshold_condition", _handle_threshold)
         register_risk_handlers(_default_registry)
+        for node_type, handler in PERFORMANCE_HANDLERS.items():
+            _default_registry.register(node_type, handler)
     return _default_registry
 
 

@@ -44,5 +44,7 @@ class PaperOrder(Base):
     status: Mapped[OrderStatus] = mapped_column(SAEnum(OrderStatus), default=OrderStatus.PENDING)
     pnl: Mapped[float] = mapped_column(Float, nullable=True)
     slippage: Mapped[float] = mapped_column(Float, nullable=True)
+    resolved_outcome: Mapped[str] = mapped_column(String, nullable=True)
+    calibration_error: Mapped[float] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

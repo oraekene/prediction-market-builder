@@ -174,6 +174,25 @@ async def get_performance(
     return perf
 
 
+@router.post("/sync-resolutions")
+async def sync_resolutions(body: dict, session: AsyncSession = Depends(get_session)):
+    resolutions = body.get("resolutions", [])
+    result = await service.sync_resolutions(resolutions, session)
+    return result
+
+
+@router.get("/metrics/{metric}")
+async def get_metric(
+    metric: str,
+    user_id: str = Query("default"),
+    window: int = Query(0, ge=0, le=5000),
+    session: AsyncSession = Depends(get_session),
+):
+    wallet = await service.get_or_create_wallet(user_id, session)
+    result = await service.get_metric(metric, session=session, wallet_id=wallet.id, window=window)
+    return result
+
+
 @router.get("/compare")
 async def compare_strategies(
     strategy_ids: str = Query(..., description="Comma-separated strategy IDs"),

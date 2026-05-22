@@ -10,6 +10,7 @@ from app.database import Base, get_session
 
 # Import all models so they register in Base.metadata before table creation
 from app.models.risk_template import RiskTemplate  # noqa: F401
+from app.models.paper_wallet import PaperWallet  # noqa: F401, PaperOrder
 
 # Create test DB with a sync engine so DDL is predictable
 DB_PATH = os.path.join(os.path.dirname(__file__), ".pytest_test.db")
@@ -49,6 +50,13 @@ async def client():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def session():
+    async with test_async_session() as s:
+        yield s
+        await s.rollback()
 
 
 @pytest.fixture

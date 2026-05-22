@@ -164,6 +164,11 @@ class PaperTradingService:
     async def get_performance(
         self, session: AsyncSession, wallet_id: str | None = None, strategy_id: str | None = None
     ) -> dict[str, Any]:
+        wallet = None
+        if wallet_id:
+            w_result = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
+            wallet = w_result.scalar_one_or_none()
+
         query = select(PaperOrder).where(PaperOrder.status == OrderStatus.FILLED)
         if strategy_id:
             query = query.where(PaperOrder.strategy_id == strategy_id)
@@ -177,12 +182,21 @@ class PaperTradingService:
         if total_trades == 0:
             return {
                 "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
                 "win_rate": 0.0,
                 "total_pnl": 0.0,
                 "sharpe_ratio": 0.0,
                 "max_drawdown": 0.0,
                 "avg_return": 0.0,
+                "avg_rr": 0.0,
+                "kelly_optimal": 0.0,
+                "edge": 0.0,
                 "profit_factor": 0.0,
+                "calibration": None,
+                "regime_buckets": {},
+                "current_balance": round(wallet.current_balance, 2) if wallet else None,
+                "initial_balance": round(wallet.initial_balance, 2) if wallet else None,
             }
 
         winning_trades = sum(1 for o in orders if o.pnl and o.pnl > 0)
@@ -215,10 +229,14 @@ class PaperTradingService:
             dd = (peak - cumulative) / peak if peak > 0 else 0
             max_dd = max(max_dd, dd)
 
-        wallet = None
-        if wallet_id:
-            w_result = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
-            wallet = w_result.scalar_one_or_none()
+        avg_win = sum(gains) / len(gains) if gains else 0
+        avg_loss = sum(abs(l) for l in losses) / len(losses) if losses else 0
+        avg_rr = round(avg_win / avg_loss, 4) if avg_loss > 0 else 0.0
+
+        edge = round(win_rate * avg_win - (1 - win_rate) * avg_loss, 4) if avg_win > 0 and avg_loss > 0 else 0.0
+        odds_ratio = avg_win / avg_loss if avg_loss > 0 else 1
+        kelly_optimal = round((win_rate * odds_ratio - (1 - win_rate)) / odds_ratio, 4) if odds_ratio > 0 else 0.0
+        kelly_optimal = max(0.0, min(1.0, kelly_optimal))
 
         result = {
             "total_trades": total_trades,
@@ -229,7 +247,12 @@ class PaperTradingService:
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": round(max_dd, 4),
             "avg_return": round(avg_return, 4),
+            "avg_rr": avg_rr,
+            "kelly_optimal": kelly_optimal,
+            "edge": edge,
             "profit_factor": profit_factor if profit_factor != float("inf") else 999.99,
+            "calibration": self._compute_brier_score(orders),
+            "regime_buckets": {},
             "current_balance": round(wallet.current_balance, 2) if wallet else None,
             "initial_balance": round(wallet.initial_balance, 2) if wallet else None,
         }
@@ -244,6 +267,8 @@ class PaperTradingService:
                 "profit_loss": round(total_pnl, 2),
                 "sharpe_ratio": sharpe_ratio,
                 "max_drawdown": round(max_dd, 4),
+                "avg_rr": avg_rr,
+                "kelly_optimal": kelly_optimal,
                 "period_start": datetime.now(timezone.utc).date(),
                 "period_end": datetime.now(timezone.utc).date(),
             })
@@ -252,15 +277,183 @@ class PaperTradingService:
 
         return result
 
+    def _compute_brier_score(self, orders: list) -> float | None:
+        errors = [o.calibration_error for o in orders if o.calibration_error is not None]
+        if not errors:
+            return None
+        return round(sum(errors) / len(errors), 4)
+
+    async def sync_resolutions(
+        self, resolutions: list[dict], session: AsyncSession
+    ) -> dict[str, Any]:
+        updated = 0
+        for r in resolutions:
+            market_id = r.get("market_id")
+            platform = r.get("platform")
+            outcome = r.get("outcome")
+            if not all([market_id, platform, outcome]):
+                continue
+
+            rows = await session.execute(
+                select(PaperOrder).where(
+                    PaperOrder.market_id == market_id,
+                    PaperOrder.platform == platform,
+                    PaperOrder.resolved_outcome.is_(None),
+                )
+            )
+            for order in rows.scalars().all():
+                order.resolved_outcome = outcome
+                actual = 1.0 if outcome == "yes" else 0.0
+                order.calibration_error = round((order.price - actual) ** 2, 4)
+                updated += 1
+
+        await session.commit()
+        return {"updated": updated, "resolutions": len(resolutions)}
+
+    async def get_metric(
+        self, metric: str, session: AsyncSession, wallet_id: str | None = None, window: int = 0
+    ) -> dict[str, Any]:
+        if metric == "current_balance":
+            value = None
+            if wallet_id:
+                wr = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
+                w = wr.scalar_one_or_none()
+                value = round(w.current_balance, 2) if w else None
+            return {"metric": metric, "value": value, "window": window, "total_available": 0}
+
+        query = select(PaperOrder).where(PaperOrder.status == OrderStatus.FILLED).order_by(PaperOrder.created_at.desc())
+        if wallet_id:
+            query = query.where(PaperOrder.wallet_id == wallet_id)
+        rows = await session.execute(query)
+        orders = rows.scalars().all()
+
+        total_available = len(orders)
+
+        if window > 0:
+            orders = orders[:window]
+
+        total = len(orders)
+        if total == 0:
+            return {"metric": metric, "value": None, "window": window, "total_available": total_available}
+
+        winning = [o for o in orders if o.pnl and o.pnl > 0]
+        losing = [o for o in orders if o.pnl and o.pnl < 0]
+        gains = [o.pnl for o in winning]
+        losses = [abs(o.pnl) for o in losing]
+        pnls = [o.pnl or 0 for o in orders]
+
+        total_pnl = sum(pnls)
+        win_rate = len(winning) / total if total > 0 else 0
+        avg_win = sum(gains) / len(gains) if gains else 0
+        avg_loss = sum(losses) / len(losses) if losses else 0
+        gross_gain = sum(gains) if gains else 0
+        gross_loss = sum(abs(l) for l in losses) if losses else 0
+
+        value = None
+        if metric == "total_pnl":
+            value = round(total_pnl, 2)
+        if metric == "win_rate":
+            value = round(win_rate, 4)
+        if metric == "avg_rr":
+            value = round(avg_win / avg_loss, 4) if avg_loss > 0 else 0.0
+        if metric == "sharpe":
+            if total > 1:
+                avg_r = sum(pnls) / total
+                var = sum((p - avg_r) ** 2 for p in pnls) / (total - 1)
+                std = math.sqrt(var)
+                value = round((avg_r / std) * math.sqrt(252), 4) if std > 0 else 0.0
+            else:
+                value = 0.0
+        if metric == "sortino":
+            if total > 1:
+                avg_r = sum(pnls) / total
+                neg_returns = [p for p in pnls if p < 0]
+                if neg_returns:
+                    d_var = sum(p ** 2 for p in neg_returns) / (total - 1)
+                    d_std = math.sqrt(d_var)
+                    value = round((avg_r / d_std) * math.sqrt(252), 4) if d_std > 0 else 0.0
+                else:
+                    value = 999.99
+            else:
+                value = 0.0
+        if metric == "calmar":
+            peak = 0
+            max_dd = 0.0
+            cumulative = 0
+            for p in pnls:
+                cumulative += p
+                if cumulative > peak:
+                    peak = cumulative
+                dd = (peak - cumulative) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+            value = round(total_pnl / max_dd, 4) if max_dd > 0 else (999.99 if total_pnl > 0 else 0.0)
+        if metric == "max_drawdown":
+            peak = 0
+            max_dd = 0.0
+            cumulative = 0
+            for p in pnls:
+                cumulative += p
+                if cumulative > peak:
+                    peak = cumulative
+                dd = (peak - cumulative) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+            value = round(max_dd, 4)
+        if metric == "profit_factor":
+            value = round(gross_gain / gross_loss, 4) if gross_loss > 0 else (999.99 if gross_gain > 0 else 0.0)
+        if metric == "kelly_optimal":
+            odds_ratio = avg_win / avg_loss if avg_loss > 0 else 1
+            kelly = (win_rate * odds_ratio - (1 - win_rate)) / odds_ratio if odds_ratio > 0 else 0.0
+            value = round(max(0.0, min(1.0, kelly)), 4)
+        if metric == "edge":
+            value = round(win_rate * avg_win - (1 - win_rate) * avg_loss, 4) if avg_win > 0 and avg_loss > 0 else 0.0
+        if metric == "brier_score":
+            errors = [o.calibration_error for o in orders if o.calibration_error is not None]
+            value = round(sum(errors) / len(errors), 4) if errors else None
+        if metric == "trade_count":
+            value = total
+        if metric == "sqn":
+            if total > 1:
+                avg_r = sum(pnls) / total
+                var = sum((p - avg_r) ** 2 for p in pnls) / (total - 1)
+                std = math.sqrt(var)
+                value = round((avg_r / std) * math.sqrt(total), 4) if std > 0 else 0.0
+            else:
+                value = 0.0
+        if metric == "recovery_factor":
+            peak = 0
+            max_dd = 0.0
+            cumulative = 0
+            for p in pnls:
+                cumulative += p
+                if cumulative > peak:
+                    peak = cumulative
+                dd = (peak - cumulative) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+            value = round(total_pnl / max_dd, 4) if max_dd > 0 else (999.99 if total_pnl > 0 else 0.0)
+        if metric == "largest_win":
+            value = round(max(gains), 2) if gains else None
+        if metric == "largest_loss":
+            value = round(min(-l for l in losses), 2) if losses else None
+        if metric == "consecutive_streak":
+            streak = 0
+            for o in sorted(
+                [o for o in orders if o.pnl is not None],
+                key=lambda x: x.created_at or datetime.min,
+            ):
+                if o.pnl > 0:
+                    streak = streak + 1 if streak >= 0 else 1
+                elif o.pnl < 0:
+                    streak = streak - 1 if streak <= 0 else -1
+            value = streak
+
+        return {"metric": metric, "value": value, "window": window, "total_available": total_available}
+
     async def compare_strategies(
         self, strategy_ids: list[str], session: AsyncSession
     ) -> list[dict[str, Any]]:
         comparisons = []
         for sid in strategy_ids:
             perf = await self.get_performance(session=session, strategy_id=sid)
-            result = await session.execute(select(select(func.count()).where(
-                PaperOrder.strategy_id == sid, PaperOrder.status == OrderStatus.FILLED
-            ).scalar()))
             comparisons.append({
                 "strategy_id": sid,
                 **perf,

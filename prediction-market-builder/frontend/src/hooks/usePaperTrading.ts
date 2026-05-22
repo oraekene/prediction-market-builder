@@ -7,6 +7,8 @@ import {
   cancelPaperOrder,
   fetchPaperPerformance,
   comparePaperStrategies,
+  syncPaperResolutions,
+  fetchPaperMetric,
 } from '@/lib/api_paper'
 
 export function usePaperWallet(userId = 'default') {
@@ -64,6 +66,26 @@ export function usePaperPerformance(strategyId?: string, userId = 'default') {
     queryKey: ['paper-performance', strategyId, userId],
     queryFn: () => fetchPaperPerformance(strategyId, userId),
     refetchInterval: 30_000,
+  })
+}
+
+export function useSyncResolutions() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: syncPaperResolutions,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['paper-wallet'] })
+      queryClient.invalidateQueries({ queryKey: ['paper-orders'] })
+      queryClient.invalidateQueries({ queryKey: ['paper-performance'] })
+    },
+  })
+}
+
+export function usePaperMetric(metric: string, window = 0, userId = 'default') {
+  return useQuery({
+    queryKey: ['paper-metric', metric, window, userId],
+    queryFn: () => fetchPaperMetric(metric, window, userId),
+    enabled: false,
   })
 }
 

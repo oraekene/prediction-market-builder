@@ -8,6 +8,7 @@ import {
   useEdgesState,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import PerformanceNode from './PerformanceNode'
 
 interface NodeData {
   label: string
@@ -66,6 +67,31 @@ interface NodeCanvasProps {
 
 export type NodeCanvasNode = FlowNode
 
+const labelToMetric: Record<string, string> = {
+  'Current Balance': 'current-balance',
+  'Total P&L': 'total-pnl',
+  'Win Rate': 'win-rate',
+  'Avg R:R': 'avg-rr',
+  'Sharpe': 'sharpe',
+  'Sortino': 'sortino',
+  'Calmar': 'calmar',
+  'Max Drawdown': 'max-drawdown',
+  'Profit Factor': 'profit-factor',
+  'Kelly %': 'kelly-optimal',
+  'Edge': 'edge',
+  'Brier Score': 'brier-score',
+  'Trade Count': 'trade-count',
+  'SQN': 'sqn',
+  'Recovery Factor': 'recovery-factor',
+  'Largest Win': 'largest-win',
+  'Largest Loss': 'largest-loss',
+  'Consecutive Streak': 'consecutive-streak',
+}
+
+const nodeTypes = {
+  performance: PerformanceNode,
+}
+
 export default function NodeCanvas({ onNodeSelect }: NodeCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges as any)
@@ -99,14 +125,18 @@ export default function NodeCanvas({ onNodeSelect }: NodeCanvasProps) {
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
-      const type = event.dataTransfer.getData('application/reactflow')
-      if (!type) return
+      const label = event.dataTransfer.getData('application/reactflow')
+      const flowType = event.dataTransfer.getData('application/reactflow-type') || 'default'
+      if (!label) return
       const position = { x: event.clientX - 100, y: event.clientY - 50 }
+      const metric = labelToMetric[label]
       const newNode: FlowNode = {
-        id: `${type.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
-        type: 'default',
+        id: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+        type: flowType,
         position,
-        data: { label: type },
+        data: metric
+          ? { label, metric, window: 50, value: null }
+          : { label },
       }
       setNodes((nds: FlowNode[]) => nds.concat(newNode))
     },
@@ -118,6 +148,7 @@ export default function NodeCanvas({ onNodeSelect }: NodeCanvasProps) {
       <ReactFlow
         nodes={nodes as any}
         edges={edges as any}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange as any}
         onEdgesChange={onEdgesChange as any}
         onConnect={onConnect as any}

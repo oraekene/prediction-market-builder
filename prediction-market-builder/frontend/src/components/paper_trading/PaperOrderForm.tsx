@@ -63,14 +63,18 @@ export default function PaperOrderForm() {
             <button
               type="button"
               onClick={() => setSide('buy')}
-              className={lex-1 py-1.5 text-xs font-medium }
+              className={`flex-1 py-1.5 text-xs font-medium ${
+                side === 'buy' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400'
+              }`}
             >
               Yes
             </button>
             <button
               type="button"
               onClick={() => setSide('sell')}
-              className={lex-1 py-1.5 text-xs font-medium }
+              className={`flex-1 py-1.5 text-xs font-medium ${
+                side === 'sell' ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'
+              }`}
             >
               No
             </button>
@@ -105,7 +109,7 @@ export default function PaperOrderForm() {
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-500">
-          Balance: 
+          Balance: ${wallet?.current_balance.toFixed(2) ?? '---'}
         </span>
         <button
           type="submit"
@@ -117,9 +121,11 @@ export default function PaperOrderForm() {
       </div>
 
       {placeOrder.data && (
-        <div className={ounded p-2 text-xs }>
+        <div className={`rounded p-2 text-xs ${
+          placeOrder.data.success ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'
+        }`}>
           {placeOrder.data.success
-            ? Order filled at {placeOrder.data.order?.fill_price} | Slippage: %
+            ? `Order filled at $${placeOrder.data.order?.fill_price} | Slippage: ${((placeOrder.data.slippage ?? 0) * 100).toFixed(2)}%`
             : placeOrder.data.error}
         </div>
       )}

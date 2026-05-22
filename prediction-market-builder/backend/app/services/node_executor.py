@@ -4,13 +4,15 @@ from typing import Any, Callable
 class ExecutionContext:
     def __init__(self, market: dict | None = None, signal: dict | None = None,
                  portfolio: dict | None = None, risk_calculator=None,
-                 portfolio_manager=None, tabpfn=None):
+                 portfolio_manager=None, tabpfn=None,
+                 performance_snapshot: dict | None = None):
         self.market = market or {}
         self.signal = signal or {}
         self.portfolio = portfolio or {}
         self.risk_calculator = risk_calculator
         self.portfolio_manager = portfolio_manager
         self.tabpfn = tabpfn
+        self.performance_snapshot = performance_snapshot or {}
 
 
 NodeHandler = Callable[[dict, dict[str, Any], ExecutionContext], Any]
@@ -47,9 +49,11 @@ class GraphExecutor:
 
         queue = [nid for nid, d in in_degree.items() if d == 0]
         outputs = {}
+        processed = 0
 
         while queue:
             nid = queue.pop(0)
+            processed += 1
             node = node_map[nid]
             node_inputs = {}
             for edge in edges:
@@ -69,6 +73,11 @@ class GraphExecutor:
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
+
+        if processed < len(nodes):
+            unprocessed = [n["id"] for n in nodes if n["id"] not in outputs]
+            for uid in unprocessed:
+                outputs[uid] = {"error": f"Cycle detected: node {uid} could not be evaluated"}
 
         action_outputs = {
             k: v for k, v in outputs.items()

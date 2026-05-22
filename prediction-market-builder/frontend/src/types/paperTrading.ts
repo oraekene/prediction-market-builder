@@ -58,9 +58,21 @@ export interface PaperPerformance {
   sharpe_ratio: number
   max_drawdown: number
   avg_return: number
+  avg_rr: number
+  kelly_optimal: number
+  edge: number
   profit_factor: number
+  calibration: number | null
+  regime_buckets: Record<string, unknown>
   current_balance: number | null
   initial_balance: number | null
+}
+
+export interface PerformanceMetricResponse {
+  metric: string
+  value: number | null
+  window: number
+  total_available: number
 }
 
 export interface StrategyComparison {
