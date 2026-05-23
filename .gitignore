@@ -8,3 +8,9 @@ __pycache__/
 *.pyc
 .env
 nousresearch-hermes-agent-*.txt
+
+# Runtime data (auto-generated caches, databases, vector stores)
+prediction-market-builder/backend/data/memory/
+prediction-market-builder/backend/pmbuilder.db
+prediction-market-builder/backend/tests/.pytest_test.db
+prediction-market-builder/backend/data/analytics.duckdb
