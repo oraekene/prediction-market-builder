@@ -24,7 +24,8 @@ services:
     ports:
       - "8888:8080"
     volumes:
-      - searxng-data:/etc/searxng
+      - ./infrastructure/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./infrastructure/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
     environment:
       SEARXNG_BASE_URL: http://localhost:8888
 
@@ -50,4 +51,3 @@ services:
 
 volumes:
   pgdata:
-  searxng-data:

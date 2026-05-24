@@ -1,0 +1,15 @@
+[botdetection.ip_limit]
+# Max 5 requests per IP per second (sliding window)
+link_token = false
+ip_limit = 5
+ip_limit_short = 10
+limit_link_token = 1000
+
+[botdetection.ip_lists]
+pass_secret = []
+pass_ip = []
+block_ip = []
+
+[botdetection.geo_ip]
+# No geo blocking
+enabled = false
