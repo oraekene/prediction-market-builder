@@ -86,7 +86,7 @@ class PolymarketConnector(ExchangeConnector):
             asks=asks,
             mid_price=mid,
             spread=spread,
-            last_price=data.get("last_price"),
+            last_price=float(data["last_price"]) if data.get("last_price") else None,
         )
 
     async def place_order(self, order: ExchangeOrder, credentials: dict) -> FillResult:

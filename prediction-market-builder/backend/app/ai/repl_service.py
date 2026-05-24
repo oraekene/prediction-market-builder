@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from RestrictedPython import safe_builtins
-from RestrictedPython.Guards import safer_getattr, guarded_write_property, guarded_write_object, guarded_write_iter
+from RestrictedPython.Guards import safer_getattr, guarded_setattr as guarded_write_object
 from RestrictedPython.compile import compile_restricted_exec
 
 logger = logging.getLogger(__name__)
