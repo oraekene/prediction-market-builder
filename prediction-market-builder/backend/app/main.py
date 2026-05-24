@@ -10,6 +10,7 @@ from app.config import settings
 from sqlalchemy import select
 from app.database import engine, create_tables
 from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies, explainability
+from app.agentic_search import search_router
 from app.routers.auth import get_current_user
 from app.services.research_scheduler import ResearchScheduler
 from app.services.market_aggregator import MarketAggregator
@@ -30,6 +31,7 @@ from app.ai.shap_explainer import ShapExplainer
 from app.services.explainability_service import ExplainabilityService
 from app.ai.alchemy_service import AlchemyService, AlchemyRequest, ConnectionEngine
 from app.ai.domain_providers import DomainRegistry
+from app.agentic_search.search_orchestrator import SearchOrchestrator
 from app.ai.domain_providers.market_provider import MarketDomainProvider
 from app.ai.domain_providers.news_provider import NewsDomainProvider
 from app.ai.domain_providers.memory_provider import MemoryDomainProvider
@@ -97,6 +99,7 @@ skill_creator = SkillCreator(
     tool_registry=tool_registry,
     git_manager=git_manager,
 )
+search_orchestrator = SearchOrchestrator()
 watchdog = WatchdogService()
 
 
@@ -154,6 +157,7 @@ async def lifespan(app: FastAPI):
     await explainability_service.initialize()
 
     _register_rlm_tools(tool_registry, rlm)
+    _register_search_tools(tool_registry, search_orchestrator)
     _register_repl_tools(tool_registry, repl_service)
     if alchemy_service is not None:
         _register_alchemy_tools(tool_registry, alchemy_service)
@@ -171,6 +175,7 @@ async def lifespan(app: FastAPI):
     scheduler.set_broadcast(research.broadcast_to_session)
     research.init_scheduler(scheduler)
     orchestrator.init_orchestrator(orchestrator_instance, watchdog, skill_creator)
+    search_router.init_search_orchestrator(search_orchestrator)
     await scheduler.start()
     await watchdog.start()
     yield
@@ -296,6 +301,11 @@ def _register_repl_tools(tr: ToolRegistry, repl_service: REPLService) -> None:
     )
 
 
+def _register_search_tools(tr: ToolRegistry, search: SearchOrchestrator) -> None:
+    from app.agentic_search import search_router as sr
+    sr.register_search_tools(tr, search)
+
+
 app = FastAPI(title="PM Strategy Builder", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
@@ -323,6 +333,7 @@ app.include_router(trades.router, dependencies=[Depends(get_current_user)])
 app.include_router(paper_trading.router, dependencies=[Depends(get_current_user)])
 app.include_router(meta_strategies.router, dependencies=[Depends(get_current_user)])
 app.include_router(explainability.router, dependencies=[Depends(get_current_user)])
+app.include_router(search_router.router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")
