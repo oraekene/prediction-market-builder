@@ -34,7 +34,16 @@ class LanceDBManager:
                 pa.field("text", pa.string()),
                 pa.field("metadata", pa.string()),
             ])
-            self.db.create_table("market_vectors", schema=schema)
+            table = self.db.create_table("market_vectors", schema=schema)
+            table.create_index("embedding", metric="cosine", num_partitions=256, num_sub_vectors=96)
+        else:
+            table = self.db.open_table("market_vectors")
+            existing = [i for i in (table.list_indices() or [])]
+            if not existing:
+                try:
+                    table.create_index("embedding", metric="cosine", num_partitions=256, num_sub_vectors=96)
+                except Exception:
+                    pass
 
     def search_markets(self, query_vector: list[float], filter_ids: list[str] | None = None, top_k: int = 20) -> list[dict]:
         table = self.db.open_table("market_vectors")

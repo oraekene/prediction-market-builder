@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./pmbuilder.db"
     postgres_url: str = "postgresql+asyncpg://pmuser:CHANGE_ME@localhost:5432/pmbuilder"
+    pgbouncer_url: str = "postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmbuilder"
+    redis_url: str = "redis://redis:6379/0"
     duckdb_path: str = "./data/analytics.duckdb"
     lancedb_path: str = "./data/vectors"
     chromadb_path: str = "./data/memory"
@@ -20,7 +22,10 @@ class Settings(BaseSettings):
     tabpfn_mode: str = "local"
     market_regime_model: str = "heuristic-ensemble"
     secret_key: str = ""
+    encryption_key: str = ""
     access_token_expire_minutes: int = 60
+    refresh_token_expire_minutes: int = 10080
+    rate_limit_per_minute: int = 60
     cors_origins: list[str] = ["http://localhost:5173"]
     log_level: str = "INFO"
 

@@ -306,6 +306,21 @@ def _register_search_tools(tr: ToolRegistry, search: SearchOrchestrator) -> None
     sr.register_search_tools(tr, search)
 
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import Response
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
 app = FastAPI(title="PM Strategy Builder", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
@@ -315,6 +330,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
+if settings.rate_limit_per_minute > 0:
+    from app.middleware.rate_limit import RateLimitMiddleware
+    app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_per_minute)
 
 
 app.include_router(auth.router)
@@ -339,3 +358,10 @@ app.include_router(search_router.router, dependencies=[Depends(get_current_user)
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/metrics")
+async def metrics():
+    from app.services.metrics import metrics_endpoint
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=metrics_endpoint(), media_type="text/plain")

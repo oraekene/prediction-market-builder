@@ -6,16 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, EmailStr
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 
 from app.database import get_session
 from app.config import settings
 from app.models.user import User
+from app.services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 
@@ -32,18 +31,36 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user_id: str
 
 
-def _create_token(user_id: str) -> str:
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+def _create_token(user_id: str, token_type: str = "access") -> str:
     now = datetime.now(timezone.utc)
+    expire = (
+        settings.access_token_expire_minutes
+        if token_type == "access"
+        else settings.refresh_token_expire_minutes
+    )
     payload = {
         "sub": user_id,
+        "type": token_type,
         "iat": now,
-        "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
+        "exp": now + timedelta(minutes=expire),
     }
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
+
+
+def _decode_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 async def get_current_user(
@@ -52,13 +69,12 @@ async def get_current_user(
 ) -> User:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    try:
-        payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=["HS256"])
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    payload = _decode_token(credentials.credentials)
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Token must be an access token")
+    user_id: str | None = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token: missing subject")
     result = await session.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
@@ -68,14 +84,24 @@ async def get_current_user(
 
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email, "display_name": current_user.display_name}
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "display_name": current_user.display_name,
+        "has_polymarket_key": bool(current_user.polymarket_key),
+        "has_kalshi_key": bool(current_user.kalshi_key),
+    }
 
 
 @router.post("/register", response_model=TokenResponse)
 async def register(req: RegisterRequest, session: AsyncSession = Depends(get_session)):
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     result = await session.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     user = User(
         email=req.email,
         hashed_password=pwd_context.hash(req.password),
@@ -83,17 +109,36 @@ async def register(req: RegisterRequest, session: AsyncSession = Depends(get_ses
     )
     session.add(user)
     await session.commit()
-    token = _create_token(user.id)
-    return TokenResponse(access_token=token, user_id=user.id)
+    access_token = _create_token(user.id, "access")
+    refresh_token = _create_token(user.id, "refresh")
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user_id=user.id)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(req: LoginRequest, session: AsyncSession = Depends(get_session)):
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     result = await session.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
     if not user or not pwd_context.verify(req.password, user.hashed_password):
         logger.warning("Failed login attempt for %s", req.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = _create_token(user.id)
+    access_token = _create_token(user.id, "access")
+    refresh_token = _create_token(user.id, "refresh")
     logger.info("User logged in: %s", user.id)
-    return TokenResponse(access_token=token, user_id=user.id)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user_id=user.id)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(req: RefreshRequest, session: AsyncSession = Depends(get_session)):
+    payload = _decode_token(req.refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Token must be a refresh token")
+    user_id = payload.get("sub")
+    result = await session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    access_token = _create_token(user.id, "access")
+    refresh_token = _create_token(user.id, "refresh")
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user_id=user.id)

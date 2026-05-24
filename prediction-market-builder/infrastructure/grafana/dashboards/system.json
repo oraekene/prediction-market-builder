@@ -1,0 +1,49 @@
+{
+  "title": "System Overview",
+  "version": 1,
+  "panels": [
+    {
+      "title": "HTTP Requests Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(http_requests_total[1m])",
+          "legendFormat": "{{method}} {{path}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "title": "Request Duration (p95)",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, path))",
+          "legendFormat": "{{method}} {{path}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "title": "DB Query Duration",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(db_query_duration_seconds_sum[5m]) / rate(db_query_duration_seconds_count[5m])",
+          "legendFormat": "{{db}} {{operation}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "title": "Active Users",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "active_users"
+        }
+      ],
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 8 }
+    }
+  ]
+}

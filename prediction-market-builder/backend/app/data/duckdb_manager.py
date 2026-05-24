@@ -42,6 +42,15 @@ class DuckDBManager:
                 period_end DATE
             )
         """)
+        self._create_indexes()
+
+    def _create_indexes(self):
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_platform ON market_analytics(platform)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_category ON market_analytics(category)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_status ON market_analytics(status)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_volume ON market_analytics(volume DESC)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_close_time ON market_analytics(close_time)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_strat_perf_id ON strategy_performance(strategy_id)")
 
     def query_markets(self, sql_filter: str = "1=1", limit: int = 1000) -> list[dict]:
         safe_filter = sql_filter.replace(";", "").strip()
