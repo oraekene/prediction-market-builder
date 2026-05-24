@@ -73,14 +73,17 @@ async def test_close_no_browser(crawler):
 @pytest.mark.asyncio
 async def test_close_with_browser(crawler):
     mock_browser = AsyncMock()
+    mock_browser.__aexit__ = AsyncMock()
     crawler._browser = mock_browser
     await crawler.close()
-    mock_browser.close.assert_awaited_once()
+    mock_browser.__aexit__.assert_awaited_once()
     assert crawler._browser is None
 
 
 @pytest.mark.asyncio
 async def test_extract_page_safe_timeout(crawler):
+    import asyncio
+
     async def slow_extract(url):
         await asyncio.sleep(100)
         return {}
@@ -109,7 +112,7 @@ async def test_ensure_browser_import_error(crawler):
 
 @pytest.mark.asyncio
 async def test_ensure_browser_launch_error(crawler):
-    with patch("camoufox.PlaywrightCamoufox") as mock_camoufox:
-        mock_camoufox.launch.side_effect = Exception("launch failed")
+    with patch("camoufox.async_api.AsyncCamoufox") as mock_camoufox_cls:
+        mock_camoufox_cls.side_effect = Exception("launch failed")
         with pytest.raises(Exception, match="launch failed"):
             await crawler.ensure_browser()

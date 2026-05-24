@@ -14,7 +14,6 @@ search:
   formats:
     - html
     - json
-  rate_limit: true
 
 server:
   port: 8080
@@ -57,7 +56,7 @@ engines:
     disabled: false
 
   - name: news
-    engine: google news
+    engine: google_news
     shortcut: n
     disabled: false
 
@@ -71,5 +70,3 @@ outgoing:
   max_request_timeout: 15.0
   useragent_suffix: ""
   extra_useragent: ""
-
-search_format: json

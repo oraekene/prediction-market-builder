@@ -32,13 +32,13 @@ class CamoufoxCrawler:
         if self._browser is not None:
             return
         try:
-            from camoufox import PlaywrightCamoufox
-            self._playwright = PlaywrightCamoufox
-            self._browser = await PlaywrightCamoufox.launch(
+            from camoufox.async_api import AsyncCamoufox
+            self._browser = AsyncCamoufox(
                 headless=self.headless,
                 humanize_mouse=True,
                 screen={"width": self.viewport["width"], "height": self.viewport["height"]},
             )
+            await self._browser.__aenter__()
             self._semaphore = asyncio.Semaphore(self.max_concurrent_pages)
             logger.info("Camoufox browser launched successfully")
         except ImportError as e:
@@ -149,11 +149,10 @@ class CamoufoxCrawler:
     async def close(self):
         if self._browser:
             try:
-                await self._browser.close()
+                await self._browser.__aexit__(None, None, None)
             except Exception as e:
                 logger.warning("Error closing browser: %s", e)
             self._browser = None
-            self._playwright = None
             logger.info("Camoufox browser closed")
 
     async def available(self) -> bool:

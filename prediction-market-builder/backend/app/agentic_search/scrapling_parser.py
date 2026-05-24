@@ -58,28 +58,29 @@ class ScraplingParser:
             return None
 
     async def parse_html(self, html: str, url: str) -> dict[str, Any]:
-        scrapling = None
+        scrapling_ok = False
+        content = None
         if self._available is None or self._available:
             try:
-                import importlib
-                scrapling = importlib.import_module("scrapling")
+                from scrapling.parser import Selector
+
+                self._available = True
+                scrapling_ok = True
+                selector = Selector(html)
+                for tag in selector.css("script, style, nav, footer, header, noscript, aside"):
+                    tag.drop()
+                texts = selector.css("body ::text, article ::text").getall()
+                content = " ".join(t.strip() for t in texts if t.strip())
             except ImportError:
                 self._available = False
-                scrapling = None
-
-        if scrapling and hasattr(scrapling, "AdaptiveParser"):
-            self._available = True
-            try:
-                parser = scrapling.AdaptiveParser()
-                result = parser.parse(html)
-                content = self._extract_scrapling(result)
             except Exception as e:
                 logger.warning("Scrapling parse failed, falling back: %s", e)
+
+        if not scrapling_ok or content is None:
+            if self.fallback_to_lxml:
                 content = self._fallback_extract(html)
-        elif self.fallback_to_lxml:
-            content = self._fallback_extract(html)
-        else:
-            content = self._basic_extract(html)
+            else:
+                content = self._basic_extract(html)
 
         title = self._extract_title(html, url)
         author = self._extract_meta(html, "author")
