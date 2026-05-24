@@ -4,7 +4,9 @@ from sqlalchemy import select
 
 from app.database import get_session
 from app.models.paper_wallet import PaperWallet, PaperOrder, OrderStatus
+from app.models.user import User
 from app.services.paper_trading import PaperTradingService
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
 service = PaperTradingService()
@@ -89,10 +91,17 @@ async def reset_wallet(user_id: str = "default", session: AsyncSession = Depends
 
 
 @router.post("/orders")
-async def place_order(body: dict, session: AsyncSession = Depends(get_session)):
+async def place_order(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     wallet_id = body.get("wallet_id")
     if not wallet_id:
         raise HTTPException(status_code=400, detail="wallet_id required")
+
+    mode = body.get("mode", "paper")
+    user = current_user if mode == "live" else None
 
     result = await service.place_paper_order(
         wallet_id=wallet_id,
@@ -105,6 +114,8 @@ async def place_order(body: dict, session: AsyncSession = Depends(get_session)):
         session=session,
         strategy_id=body.get("strategy_id"),
         risk_profile=body.get("risk_profile"),
+        mode=mode,
+        user=user,
     )
 
     if not result["success"]:
@@ -115,6 +126,29 @@ async def place_order(body: dict, session: AsyncSession = Depends(get_session)):
         }
 
     return result
+
+
+@router.post("/trading-mode")
+async def set_trading_mode(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    mode = body.get("mode", "paper")
+    if mode not in ("paper", "live"):
+        raise HTTPException(status_code=400, detail="mode must be 'paper' or 'live'")
+
+    prefs = dict(current_user.preferences or {})
+    prefs["trading_mode"] = mode
+    current_user.preferences = prefs
+    await session.commit()
+
+    if mode == "live":
+        has_key = bool(current_user.polymarket_key or current_user.kalshi_key or current_user.drift_key)
+        if not has_key:
+            return {"mode": mode, "warning": "No exchange API keys configured. Live trading will fail."}
+
+    return {"mode": mode}
 
 
 @router.get("/orders")
@@ -149,6 +183,7 @@ async def list_orders(
             "status": o.status.value,
             "pnl": o.pnl,
             "slippage": o.slippage,
+            "platform_order_id": o.platform_order_id,
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "updated_at": o.updated_at.isoformat() if o.updated_at else None,
         })

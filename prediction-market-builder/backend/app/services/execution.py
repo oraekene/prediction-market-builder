@@ -1,5 +1,14 @@
-﻿import random
-from typing import Any
+﻿import logging
+import random
+from typing import Any, Literal
+
+from app.services.exchange_base import ExchangeOrder, OrderBook, OrderBookLevel, FillResult
+from app.services.polymarket_connector import PolymarketConnector
+from app.services.kalshi_connector import KalshiConnector
+from app.services.drift_connector import DriftConnector
+from app.services.execution_config import POLYMARKET_SETTINGS, KALSHI_SETTINGS, DRIFT_SETTINGS
+
+logger = logging.getLogger(__name__)
 
 
 class SimulatedOrderBook:
@@ -83,3 +92,120 @@ class SimulatedExecutionEngine:
             "slippage": slippage,
             "fill_probability": round(fill_probability, 3),
         }
+
+
+class ExecutionEngine:
+    def __init__(self):
+        self._connectors: dict[str, Any] = {
+            "polymarket": PolymarketConnector(),
+            "kalshi": KalshiConnector(),
+            "drift": DriftConnector(),
+        }
+
+    def _get_credentials(self, user) -> dict:
+        from app.services.encryption import encryption_service
+        creds: dict[str, str] = {}
+        if user.polymarket_key:
+            try:
+                raw = encryption_service.decrypt(user.polymarket_key)
+                parts = raw.split(":", 1)
+                creds["api_key"] = parts[0]
+                if len(parts) > 1:
+                    creds["secret"] = parts[1]
+            except Exception:
+                creds["api_key"] = user.polymarket_key
+        if user.kalshi_key:
+            creds["private_key"] = user.kalshi_key
+        if user.drift_key:
+            creds["api_key"] = user.drift_key
+        return creds
+
+    def _get_connector(self, platform: str):
+        connector = self._connectors.get(platform)
+        if not connector:
+            raise ValueError(f"Unsupported platform: {platform}")
+        return connector
+
+    async def get_order_book(self, platform: str, market_id: str) -> OrderBook:
+        return await self._get_connector(platform).get_order_book(market_id)
+
+    async def place_order(self, platform: str, market_id: str, side: str,
+                          amount: float, price: float, user, *,
+                          order_type: str = "market",
+                          strategy_id: str | None = None) -> FillResult:
+        connector = self._get_connector(platform)
+        credentials = self._get_credentials(user)
+        order = ExchangeOrder(
+            platform=platform,
+            market_id=market_id,
+            side=side,
+            order_type=order_type,
+            price=price,
+            amount=amount,
+            user_id=user.id,
+            strategy_id=strategy_id,
+        )
+        return await connector.place_order(order, credentials)
+
+    async def cancel_order(self, platform: str, platform_order_id: str) -> bool:
+        return await self._get_connector(platform).cancel_order(platform_order_id)
+
+    async def get_order_status(self, platform: str, platform_order_id: str) -> FillResult:
+        return await self._get_connector(platform).get_order_status(platform_order_id)
+
+    async def get_balance(self, platform: str, user) -> list:
+        credentials = self._get_credentials(user)
+        return await self._get_connector(platform).get_balance(credentials)
+
+    async def calculate_slippage(self, platform: str, market_id: str,
+                                  amount: float, side: str) -> dict:
+        book = await self.get_order_book(platform, market_id)
+        levels = book.asks if side == "buy" else book.bids
+        remaining = amount
+        total_cost = 0.0
+        fill_curve = []
+        for level in levels:
+            if remaining <= 0:
+                break
+            take = min(remaining, level.size)
+            total_cost += take * level.price
+            remaining -= take
+            fill_curve.append({"price": level.price, "cumulative_amount": amount - remaining})
+        filled = amount - remaining
+        avg_price = total_cost / filled if filled > 0 else book.mid_price
+        slippage = abs(avg_price - book.mid_price) / book.mid_price if book.mid_price > 0 else 0
+        return {
+            "estimated_slippage": round(slippage, 6),
+            "price_impact": round((avg_price - book.mid_price) / book.mid_price * 100, 4) if book.mid_price > 0 else 0,
+            "avg_fill_price": round(avg_price, 4),
+            "filled_amount": round(filled, 4),
+            "fill_curve": fill_curve,
+        }
+
+    async def monitor_order(self, platform: str, platform_order_id: str,
+                            max_wait: int = 60, poll_interval: int = 2) -> FillResult:
+        import asyncio
+        elapsed = 0
+        while elapsed < max_wait:
+            result = await self.get_order_status(platform, platform_order_id)
+            if result.status in ("filled", "cancelled", "failed"):
+                return result
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        result = await self.get_order_status(platform, platform_order_id)
+        if result.status == "pending":
+            result.status = "pending_review"
+        return result
+
+    async def available(self, platform: str) -> bool:
+        try:
+            return await self._get_connector(platform).available()
+        except Exception:
+            return False
+
+    async def close(self):
+        for connector in self._connectors.values():
+            try:
+                await connector.close()
+            except Exception:
+                pass

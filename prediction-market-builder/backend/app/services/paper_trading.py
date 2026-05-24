@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paper_wallet import PaperWallet, PaperOrder, OrderStatus
 from app.models.trade import Trade, TradeStatus
-from app.services.execution import SimulatedExecutionEngine
+from app.services.execution import SimulatedExecutionEngine, ExecutionEngine
 from app.services.portfolio_manager import PortfolioManager
 from app.services.risk_manager import RiskManager, RiskProfile
 from app.data.duckdb_manager import DuckDBManager
@@ -15,8 +15,12 @@ from app.data.duckdb_manager import DuckDBManager
 
 class PaperTradingService:
     def __init__(self):
-        self.execution_engine = SimulatedExecutionEngine()
+        self.simulated_engine = SimulatedExecutionEngine()
+        self.live_engine = ExecutionEngine()
         self.portfolio_manager = PortfolioManager()
+
+    def _get_engine(self, mode: str):
+        return self.live_engine if mode == "live" else self.simulated_engine
 
     async def get_or_create_wallet(self, user_id: str, session: AsyncSession) -> PaperWallet:
         result = await session.execute(
@@ -59,13 +63,16 @@ class PaperTradingService:
         session: AsyncSession,
         strategy_id: str | None = None,
         risk_profile: dict | None = None,
+        mode: str = "paper",
+        user=None,
     ) -> dict[str, Any]:
         wallet_result = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
         wallet = wallet_result.scalar_one_or_none()
         if not wallet:
             return {"success": False, "error": "Wallet not found"}
-        if wallet.current_balance < amount:
-            return {"success": False, "error": "Insufficient balance"}
+
+        if mode == "live" and user is None:
+            return {"success": False, "error": "User required for live trading"}
 
         if risk_profile:
             profile = RiskProfile(
@@ -88,8 +95,40 @@ class PaperTradingService:
             if not risk_result["approved"]:
                 return {"success": False, "error": "Risk check failed", "violations": risk_result["violations"]}
 
-        order_book = self.execution_engine.get_order_book(platform, price, 1_000_000)
-        fill_result = self.execution_engine.simulate_fill(platform, side, amount, price, order_book)
+        engine = self._get_engine(mode)
+        if mode == "paper":
+            if wallet.current_balance < amount:
+                return {"success": False, "error": "Insufficient balance"}
+            order_book = self.simulated_engine.get_order_book(platform, price, 1_000_000)
+            fill_result = self.simulated_engine.simulate_fill(platform, side, amount, price, order_book)
+            fill_data = {
+                "filled_amount": fill_result["filled_amount"],
+                "fill_price": fill_result["fill_price"],
+                "status": fill_result["status"],
+                "slippage": fill_result["slippage"],
+                "filled": fill_result["filled"],
+            }
+            platform_order_id = None
+        else:
+            fill = await self.live_engine.place_order(platform, market_id, side, amount, price, user, strategy_id=strategy_id)
+            fill_data = {
+                "filled_amount": fill.filled_amount,
+                "fill_price": fill.fill_price,
+                "status": fill.status,
+                "slippage": fill.slippage,
+                "filled": fill.status == "filled",
+            }
+            platform_order_id = fill.platform_order_id
+
+        status_str = fill_data["status"]
+        if status_str == "pending_review":
+            order_status = OrderStatus.PENDING
+        elif status_str == "partial":
+            order_status = OrderStatus.PARTIAL
+        elif status_str == "filled":
+            order_status = OrderStatus.FILLED
+        else:
+            order_status = OrderStatus.CANCELLED
 
         order = PaperOrder(
             wallet_id=wallet_id,
@@ -101,27 +140,28 @@ class PaperTradingService:
             order_type="market",
             price=price,
             amount=amount,
-            filled_amount=fill_result["filled_amount"],
-            fill_price=fill_result["fill_price"],
-            status=OrderStatus(fill_result["status"]),
-            slippage=fill_result["slippage"],
+            filled_amount=fill_data["filled_amount"],
+            fill_price=fill_data["fill_price"],
+            status=order_status,
+            slippage=fill_data["slippage"],
+            platform_order_id=platform_order_id,
         )
 
-        if fill_result["filled"]:
-            cost = fill_result["filled_amount"] * fill_result["fill_price"]
+        if fill_data["filled"] and mode == "paper":
+            cost = fill_data["filled_amount"] * fill_data["fill_price"]
             wallet.current_balance = round(wallet.current_balance - cost, 2)
 
             if side == "sell":
-                order.pnl = round(fill_result["filled_amount"] * fill_result["fill_price"], 2)
+                order.pnl = round(fill_data["filled_amount"] * fill_data["fill_price"], 2)
             else:
-                order.pnl = round(fill_result["filled_amount"] * (1 - fill_result["fill_price"]), 2)
+                order.pnl = round(fill_data["filled_amount"] * (1 - fill_data["fill_price"]), 2)
 
         session.add(order)
         await session.commit()
         await session.refresh(order)
 
         return {
-            "success": fill_result["filled"],
+            "success": fill_data["filled"],
             "order": {
                 "id": order.id,
                 "platform": order.platform,
@@ -134,11 +174,12 @@ class PaperTradingService:
                 "status": order.status.value,
                 "pnl": order.pnl,
                 "slippage": order.slippage,
+                "platform_order_id": order.platform_order_id,
                 "created_at": order.created_at.isoformat() if order.created_at else None,
             },
-            "wallet_balance": wallet.current_balance,
-            "slippage": fill_result["slippage"],
-            "fill_probability": fill_result["fill_probability"],
+            "wallet_balance": wallet.current_balance if mode == "paper" else None,
+            "slippage": fill_data["slippage"],
+            "mode": mode,
         }
 
     async def cancel_order(self, order_id: str, session: AsyncSession) -> bool:
