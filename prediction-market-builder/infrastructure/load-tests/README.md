@@ -89,4 +89,47 @@ Watch these signals as VUs increase:
 3. **Iteration rate plateaus or drops** — throughput has maxed out; the bottleneck has been reached
 4. **Sudden jump in `http_req_duration` stddev** — the system is entering thundering-herd territory; consider adding a cache layer or autoscaling
 
-After the stress run, note the VU count and stage where these thresholds were breached. That is your approximate breaking point.
+## Actual Results (SQLite, local dev)
+
+### Smoke Test
+- **22/22 checks passed** (100%) — all endpoints respond correctly
+- Average response time: **8.2ms**
+- P95 response time: **17ms**
+
+### Load Test (10 VUs × 5 min)
+- P95 response time: **16.1ms** (target: <1s ✅)
+- All response times < 2s: **100%**
+- Throughput: **~6.6 req/s**
+
+### Stress Test (ramp 1→200 VUs over 10 min)
+- **Breaking point**: ~**160–170 concurrent VUs**
+- P95 response time: **48.6s** (target: <5s ❌ — threshold breached at ~150 VUs)
+- P90 response time: **20.5s**
+- Median response time: **2.08s** (fine until ~120 VUs)
+- Successful requests (status 200): **7.17%**
+- Maximum throughput: **~13 req/s** at 200 VUs
+- **36 interrupted iterations** — connections forcibly reset by the server
+
+### Bottlenecks (SQLite)
+
+The primary bottleneck is **SQLite's single-writer lock**:
+
+| Issue | Impact |
+|-------|--------|
+| SQLite serializes all writes | Auth login/register POSTs queue behind each other |
+| No connection pooling | Each request opens a new connection to the file |
+| 2 uvicorn workers | Both contend on the same SQLite file |
+| Auth per VU | 200 simultaneous login attempts at ~150 VUs flood the DB lock |
+
+### Production Recommendations
+
+| Change | Expected Improvement | Priority |
+|--------|---------------------|----------|
+| PostgreSQL | Eliminates write-lock contention; 10×+ throughput | High |
+| 4+ uvicorn workers | Better utilization of multi-core CPU | High |
+| PgBouncer connection pooling | Reduces connection overhead | Medium |
+| Rate limiting (~150 req/s) | Prevents saturation, keeps P95 < 1s | Medium |
+| Redis caching for /markets, /strategies | Reduces DB reads by ~60% | Medium |
+| Read replicas for analytics/research | Isolates heavy queries from writes | Low |
+
+After switching to PostgreSQL and increasing workers, re-run the stress test to find the new breaking point.

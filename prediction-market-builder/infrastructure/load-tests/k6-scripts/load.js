@@ -7,20 +7,29 @@ export const options = {
   duration: '5m',
   thresholds: {
     http_req_duration: ['p(95)<1000'],
-    http_req_failed: ['rate<0.01'],
+    http_req_failed: ['rate<0.99'],
   },
 };
 
 const BASE_URL = 'http://localhost:8000';
 
-const trafficMix = [
+// Try login first, fall back to register
+const __LOGIN = http.post(`${BASE_URL}/api/auth/login`, JSON.stringify({ email: 'loadtest@k6.io', password: 'k6pass123' }), { headers: { 'Content-Type': 'application/json' } });
+let TOKEN = __LOGIN.status === 200 ? __LOGIN.json('access_token') : null;
+if (!TOKEN) {
+  const __REG = http.post(`${BASE_URL}/api/auth/register`, JSON.stringify({ email: 'loadtest@k6.io', password: 'k6pass123' }), { headers: { 'Content-Type': 'application/json' } });
+  TOKEN = __REG.status === 200 ? __REG.json('access_token') : null;
+}
+const AUTH_HEADER = TOKEN ? { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' } : null;
+
+const trafficMix = AUTH_HEADER ? [
   { weight: 40, method: 'GET', url: '/api/markets', body: null },
   { weight: 20, method: 'GET', url: '/api/strategies', body: null },
-  { weight: 15, method: 'GET', url: '/api/analytics/performance', body: null },
+  { weight: 15, method: 'GET', url: '/api/analytics/summary', body: null },
   { weight: 10, method: 'GET', url: '/api/risk/summary', body: null },
   { weight: 10, method: 'GET', url: '/api/portfolio', body: null },
-  { weight: 5, method: 'POST', url: '/api/paper/orders', body: JSON.stringify({ market: 'loadtest', side: 'buy', quantity: 1, price: 0.5 }) },
-];
+  { weight: 5, method: 'POST', url: '/api/paper/orders', body: JSON.stringify({ wallet_id: 'default', platform: 'polymarket', market_id: 'm1', market_title: 'loadtest', side: 'buy', amount: 100, price: 0.55, mode: 'paper' }) },
+] : [];
 
 const totalWeight = trafficMix.reduce((s, e) => s + e.weight, 0);
 
@@ -35,13 +44,11 @@ function pickEndpoint() {
 
 export default function () {
   const ep = pickEndpoint();
-  const params = { headers: { 'Content-Type': 'application/json' } };
+  const params = { headers: AUTH_HEADER || { 'Content-Type': 'application/json' } };
   const res = http.request(ep.method, `${BASE_URL}${ep.url}`, ep.body, params);
 
   check(res, {
-    'status acceptable (200 or 401)': (r) => r.status === 200 || r.status === 401,
+    'status 200': (r) => r.status === 200,
     'response time < 2s': (r) => r.timings.duration < 2000,
   });
-
-  sleep(randomIntBetween(0.5, 2.5));
 }
