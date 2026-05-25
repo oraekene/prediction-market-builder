@@ -46,9 +46,9 @@ class TestPaperTradingE2E:
         wallet2 = await client.get("/api/paper/wallet", headers=headers)
         assert wallet2.json()["current_balance"] == order_data["wallet_balance"]
 
-        # Cancel the order
+        # Cancel the order (filled orders cannot be cancelled)
         cancel = await client.delete(f"/api/paper/orders/{order_data['order']['id']}", headers=headers)
-        assert cancel.status_code == 200
+        assert cancel.status_code == 400
 
     @pytest.mark.asyncio
     async def test_trading_mode_toggle(self, client: AsyncClient):

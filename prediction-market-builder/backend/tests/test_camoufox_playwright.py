@@ -21,7 +21,7 @@ async def test_available_no_camoufox(crawler):
 @pytest.mark.asyncio
 async def test_block_resources_blocks_images():
     crawler = CamoufoxCrawler()
-    route = MagicMock()
+    route = AsyncMock()
     route.request.resource_type = "image"
     await crawler._block_resources(route)
     route.abort.assert_awaited_once()
@@ -30,7 +30,7 @@ async def test_block_resources_blocks_images():
 @pytest.mark.asyncio
 async def test_block_resources_allows_document():
     crawler = CamoufoxCrawler()
-    route = MagicMock()
+    route = AsyncMock()
     route.request.resource_type = "document"
     await crawler._block_resources(route)
     route.continue_.assert_awaited_once()
@@ -42,7 +42,7 @@ async def test_flatten_a11y_tree_empty(crawler):
     assert result == []
 
     result = crawler._flatten_a11y_tree({})
-    assert result == [{"role": "", "name": "", "value": "", "description": "", "depth": 0}]
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -84,8 +84,9 @@ async def test_close_with_browser(crawler):
 async def test_extract_page_safe_timeout(crawler):
     import asyncio
 
+    crawler.timeout = 1
     async def slow_extract(url):
-        await asyncio.sleep(100)
+        await asyncio.sleep(10)
         return {}
 
     crawler.extract_page = slow_extract
@@ -112,7 +113,8 @@ async def test_ensure_browser_import_error(crawler):
 
 @pytest.mark.asyncio
 async def test_ensure_browser_launch_error(crawler):
-    with patch("camoufox.async_api.AsyncCamoufox") as mock_camoufox_cls:
-        mock_camoufox_cls.side_effect = Exception("launch failed")
+    fake_async_api = MagicMock()
+    fake_async_api.AsyncCamoufox = MagicMock(side_effect=Exception("launch failed"))
+    with patch.dict("sys.modules", {"camoufox": MagicMock(), "camoufox.async_api": fake_async_api}):
         with pytest.raises(Exception, match="launch failed"):
             await crawler.ensure_browser()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 from httpx import AsyncClient, Request, Response
 from unittest.mock import AsyncMock
@@ -10,6 +11,11 @@ from app.agentic_search.searxng_client import (
     SearXNGTimeoutError,
     SearXNGParseError,
 )
+
+
+def _resp(status_code, json_data=None, text=None):
+    req = Request("GET", "http://test:8888/search")
+    return Response(status_code, json=json_data, text=text, request=req)
 
 
 @pytest.fixture
@@ -50,7 +56,7 @@ def sample_response():
 @pytest.mark.asyncio
 async def test_search_success(client, sample_response, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(200, json=sample_response)
+        return _resp(200, json_data=sample_response)
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     results = await client.search("test query")
@@ -64,7 +70,7 @@ async def test_search_success(client, sample_response, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_empty_results(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(200, json={"query": "x", "number_of_results": 0, "results": []})
+        return _resp(200, json_data={"query": "x", "number_of_results": 0, "results": []})
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     results = await client.search("empty query")
@@ -74,7 +80,7 @@ async def test_search_empty_results(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_connection_error(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        raise SearXNGUnavailableError("Connection refused")
+        raise httpx.RequestError("Connection refused")
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     with pytest.raises(SearXNGUnavailableError):
@@ -84,7 +90,7 @@ async def test_search_connection_error(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_timeout(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        raise TimeoutError()
+        raise httpx.TimeoutException("timeout", request=None)
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     with pytest.raises(SearXNGUnavailableError):
@@ -94,7 +100,7 @@ async def test_search_timeout(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_invalid_json(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(200, text="not-json")
+        return _resp(200, text="not-json")
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     with pytest.raises(SearXNGParseError):
@@ -104,7 +110,7 @@ async def test_search_invalid_json(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_http_error(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(500)
+        return _resp(500)
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     with pytest.raises(SearXNGUnavailableError):
@@ -119,8 +125,8 @@ async def test_search_multi_deduplicates(client, sample_response, monkeypatch):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return Response(200, json=sample_response)
-        return Response(200, json={
+            return _resp(200, json_data=sample_response)
+        return _resp(200, json_data={
             "query": "q2",
             "number_of_results": 1,
             "results": [{
@@ -146,8 +152,8 @@ async def test_search_multi_partial_failure(client, sample_response, monkeypatch
     async def mock_get(url, **kwargs):
         q = kwargs["params"]["q"]
         if q == "fail":
-            raise SearXNGUnavailableError("fail")
-        return Response(200, json=sample_response)
+            raise httpx.RequestError("fail")
+        return _resp(200, json_data=sample_response)
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     results = await client.search_multi(["good", "fail"])
@@ -157,7 +163,7 @@ async def test_search_multi_partial_failure(client, sample_response, monkeypatch
 @pytest.mark.asyncio
 async def test_count_results(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(200, json={"query": "test", "number_of_results": 42, "results": []})
+        return _resp(200, json_data={"query": "test", "number_of_results": 42, "results": []})
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     count = await client.count_results("test")
@@ -167,7 +173,7 @@ async def test_count_results(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_check_available_success(client, monkeypatch):
     async def mock_get(url, **kwargs):
-        return Response(200, json={"results": []})
+        return _resp(200, json_data={"results": []})
 
     monkeypatch.setattr(client, "_get_client", AsyncMock(return_value=AsyncMock(get=mock_get)))
     available = await client.check_available()

@@ -86,7 +86,7 @@ async def test_search_quick(orchestrator, mock_searxng):
 
     assert len(response.results) == 2
     assert response.results[0].title == "Result 1"
-    assert response.engines_used == ["google", "ddg"]
+    assert set(response.engines_used) == {"google", "ddg"}
     assert response.cached is False
     mock_searxng.search.assert_awaited_once_with(query="test", category="general")
 

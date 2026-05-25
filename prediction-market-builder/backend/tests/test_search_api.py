@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
-from app.agentic_search.search_router import router, init_search_orchestrator, register_search_tools
+from app.agentic_search.search_router import router, init_search_orchestrator, register_search_tools, _orchestrator as mod_orchestrator
 from app.agentic_search.schemas import (
     SearchRequest,
     SearchResponse,
@@ -45,10 +45,10 @@ def _make_search_response() -> SearchResponse:
 
 @pytest.fixture
 def mock_orchestrator():
-    orch = AsyncMock()
+    orch = MagicMock()
     orch.search = AsyncMock(return_value=_make_search_response())
     orch.self_check = AsyncMock(return_value={"searxng": True, "scrapling": True, "camoufox": False})
-    orch.camoufox = AsyncMock()
+    orch.camoufox = MagicMock()
     orch.camoufox.extract_page_safe = AsyncMock(return_value={
         "url": "https://example.com",
         "title": "Test Page",
@@ -107,12 +107,12 @@ class TestSearchEndpoint:
         data = resp.json()
         assert len(data["results"]) <= 5
 
-    def test_search_invalid_depth_defaults(self, client):
+    def test_search_invalid_depth_returns_422(self, client):
         resp = client.post("/api/v1/search", json={
             "query": "test",
             "depth": "ultra",
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 422
 
     def test_search_status(self, client):
         resp = client.get("/api/v1/search/status")
@@ -123,6 +123,14 @@ class TestSearchEndpoint:
 
 
 class TestSearchNotInitialized:
+    @pytest.fixture(autouse=True)
+    def reset_orchestrator(self):
+        import app.agentic_search.search_router as sr
+        old = sr._orchestrator
+        sr._orchestrator = None
+        yield
+        sr._orchestrator = old
+
     @pytest.fixture
     def app_no_init(self):
         app = FastAPI()
@@ -171,8 +179,7 @@ class TestToolRegistration:
     def test_search_web_dispatch(self):
         tr = ToolRegistry()
         mock_orch = MagicMock()
-        resp = _make_search_response()
-        mock_orch.search = MagicMock(return_value=resp)
+        mock_orch.search = AsyncMock(return_value=_make_search_response())
         register_search_tools(tr, mock_orch)
 
         result = tr.dispatch("search_web", {"query": "test", "depth": "quick"})
@@ -182,8 +189,7 @@ class TestToolRegistration:
     def test_search_news_dispatch(self):
         tr = ToolRegistry()
         mock_orch = MagicMock()
-        resp = _make_search_response()
-        mock_orch.search = MagicMock(return_value=resp)
+        mock_orch.search = AsyncMock(return_value=_make_search_response())
         register_search_tools(tr, mock_orch)
 
         result = tr.dispatch("search_news", {"query": "latest news"})
@@ -193,7 +199,7 @@ class TestToolRegistration:
         tr = ToolRegistry()
         mock_orch = MagicMock()
         mock_orch.camoufox = MagicMock()
-        mock_orch.camoufox.extract_page_safe = MagicMock(return_value={
+        mock_orch.camoufox.extract_page_safe = AsyncMock(return_value={
             "url": "https://example.com",
             "content": "test", "title": "", "status_code": 200, "took_ms": 50,
         })
