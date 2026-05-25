@@ -1,0 +1,48 @@
+groups:
+  - name: backend
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate > 5% for 5 minutes"
+          description: "HTTP 5xx rate is {{ $value | humanizePercentage }} over the last 5m"
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, path)) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 latency > 2s"
+          description: "P95 latency for {{ $labels.method }} {{ $labels.path }} is {{ $value }}s"
+
+      - alert: RateLimitFlood
+        expr: rate(http_requests_total{status="429"}[1m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limit hits > 10/min"
+          description: "Rate limiting is being triggered at {{ $value }} req/s"
+
+      - alert: HighDBLatency
+        expr: rate(db_query_duration_seconds_sum[5m]) / rate(db_query_duration_seconds_count[5m]) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Avg DB query > 1s"
+          description: "Average DB query duration is {{ $value }}s over 5m"
+
+      - alert: ServiceDown
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend service is down"
+          description: "Backend has been unreachable for > 1 minute"

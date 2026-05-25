@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from uuid import uuid4
 
 from pathlib import Path
 
@@ -309,6 +310,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import Response
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        rid = request.headers.get("X-Request-ID") or str(uuid4())
+        request.state.request_id = rid
+        response: Response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response: Response = await call_next(request)
@@ -322,6 +332,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="PM Strategy Builder", version="0.1.0", lifespan=lifespan)
 
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
