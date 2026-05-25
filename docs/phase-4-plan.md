@@ -805,7 +805,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: User guide** — covers:
+- [x] **Step 1: User guide** — covers:
   - Architecture overview (5-layer system)
   - Quick start: authentication, market browsing, first strategy
   - Chat mode: natural language strategy creation
@@ -816,11 +816,11 @@
   - Real trading: API key setup, safety limits, execution monitoring
   - Analytics dashboard: portfolio view, risk metrics, performance charts
 
-- [ ] **Step 2: API reference**
+- [x] **Step 2: API reference**
   - Auto-generate OpenAPI spec from FastAPI routes
   - Hand-write key endpoint documentation: auth flow, market search, strategy CRUD, risk endpoints, WebSocket chat protocol
 
-- [ ] **Step 3: Strategy template docs**
+- [x] **Step 3: Strategy template docs**
   - Document each node type with examples
   - Template patterns: momentum following, mean reversion, volatility breakout, cross-market arbitrage, news sentiment, hedging
   - Include sample node graphs (JSON)
@@ -831,12 +831,12 @@
 
 **Note:** Needs a UX audit of current flow. Plan outline:
 
-- [ ] **Step 1: Audit current onboarding**
+- [x] **Step 1: Audit current onboarding**
   - Walk through: login → first view → create strategy → paper trade → real trade
   - Identify friction points (cognitive load, unclear CTAs, empty states)
   - Time each step
 
-- [ ] **Step 2: Implement improvements based on audit**
+- [x] **Step 2: Implement improvements based on audit**
   - Empty state illustrations + call-to-action
   - Guided tour for first-time users
   - Sample strategies pre-loaded in paper mode
@@ -854,21 +854,21 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write k6 smoke test**
+- [x] **Step 1: Write k6 smoke test**
   - 1 virtual user, iterate through all endpoints
   - Verify baseline latency and correctness
 
-- [ ] **Step 2: Write k6 load test**
+- [x] **Step 2: Write k6 load test**
   - 10 VUs, 5 min duration
   - Mix: 60% market listing, 20% strategy evaluation, 10% WebSocket chat, 10% risk metrics
   - Target: P95 < 1s, error rate < 1%
 
-- [ ] **Step 3: Write k6 stress test**
+- [x] **Step 3: Write k6 stress test**
   - Ramp from 1 to 200 VUs over 10 min
   - Find breaking point (where error rate > 5% or latency > 5s)
   - Document capacity limits
 
-- [ ] **Step 4: Run and fix**
+- [ ] **Step 4: Run and fix** *(requires running backend server)*
   - Run each test, record results
   - Fix identified bottlenecks (add indexes, optimize queries, increase resources)
   - Re-test until targets met
@@ -888,7 +888,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: deploy.sh**
+- [x] **Step 1: deploy.sh**
   - Pull latest from git
   - Build frontend: `npm run build`
   - Build backend: `docker compose build backend`
@@ -897,7 +897,7 @@
   - Health check before declaring success
   - Rollback on failure
 
-- [ ] **Step 2: nginx.conf**
+- [x] **Step 2: nginx.conf**
   - Reverse proxy: `/api/` → backend, `/ws` → backend WebSocket, `/*` → frontend
   - SSL termination
   - Rate limiting at proxy level
@@ -905,20 +905,20 @@
   - Static file caching
   - Request size limits
 
-- [ ] **Step 3: cloudflare.toml**
+- [x] **Step 3: cloudflare.toml**
   - DNS: A records for app domain
   - SSL/TLS: Full (strict)
   - WAF rules: rate limiting, bot fight mode, SQL injection protection
   - Caching rules for static assets
   - Page Rules: always online, SSL
 
-- [ ] **Step 4: Backup strategy**
+- [x] **Step 4: Backup strategy (backup.sh)**
   - Daily Postgres dump: `pg_dump`
   - Backup retention: 7 daily, 4 weekly, 3 monthly
   - Encrypt backups before upload to cloud storage
   - Test restore procedure quarterly
 
-- [ ] **Step 5: seed_data.py**
+- [x] **Step 5: seed_data.py + migrate.sh**
   - Create admin user
   - Create sample strategies
   - Create template risk profiles
