@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -148,6 +149,3 @@ class DriftConnector(ExchangeConnector):
         if self._client:
             await self._client.aclose()
             self._client = None
-
-
-import asyncio

@@ -14,13 +14,59 @@ from app.data.duckdb_manager import DuckDBManager
 
 
 class PaperTradingService:
-    def __init__(self):
+    def __init__(self, max_loss_limit: float = 100.0):
         self.simulated_engine = SimulatedExecutionEngine()
         self.live_engine = ExecutionEngine()
         self.portfolio_manager = PortfolioManager()
+        self.max_loss_limit = max_loss_limit
+        self._confirmed_live: set[str] = set()
 
     def _get_engine(self, mode: str):
         return self.live_engine if mode == "live" else self.simulated_engine
+
+    async def confirm_live(self, user_id: str) -> dict:
+        self._confirmed_live.add(user_id)
+        return {"confirmed": True, "user_id": user_id}
+
+    def is_live_confirmed(self, user_id: str) -> bool:
+        return user_id in self._confirmed_live
+
+    async def _compute_session_loss(self, session: AsyncSession, user_id: str) -> float:
+        result = await session.execute(
+            select(func.coalesce(func.sum(PaperOrder.pnl), 0)).where(
+                PaperOrder.platform_order_id.isnot(None),
+                PaperOrder.pnl.isnot(None),
+                PaperOrder.pnl < 0,
+            )
+        )
+        return abs(result.scalar() or 0)
+
+    async def live_connection_ok(self, platform: str) -> bool:
+        try:
+            return await self.live_engine.available(platform)
+        except Exception:
+            return False
+
+    async def kill_switch(self, session: AsyncSession, user_id: str) -> dict:
+        wallet = await self.get_or_create_wallet(user_id, session)
+        if not wallet:
+            return {"cancelled": 0, "status": "wallet_not_found"}
+        rows = await session.execute(
+            select(PaperOrder).where(
+                PaperOrder.wallet_id == wallet.id,
+                PaperOrder.status.in_([OrderStatus.PENDING, OrderStatus.PARTIAL]),
+            )
+        )
+        orders = rows.scalars().all()
+        for order in orders:
+            if order.platform_order_id:
+                try:
+                    await self.live_engine.cancel_order(order.platform, order.platform_order_id)
+                except Exception:
+                    pass
+            order.status = OrderStatus.CANCELLED
+        await session.commit()
+        return {"cancelled": len(orders), "status": "all_orders_cancelled"}
 
     async def get_or_create_wallet(self, user_id: str, session: AsyncSession) -> PaperWallet:
         result = await session.execute(
@@ -96,6 +142,14 @@ class PaperTradingService:
                 return {"success": False, "error": "Risk check failed", "violations": risk_result["violations"]}
 
         engine = self._get_engine(mode)
+
+        if mode == "live":
+            if user.id not in self._confirmed_live:
+                return {"success": False, "error": "Live trading not confirmed", "need_confirmation": True}
+            session_loss = await self._compute_session_loss(session, user_id=wallet.user_id)
+            if session_loss >= self.max_loss_limit:
+                return {"success": False, "error": f"Session loss limit (${self.max_loss_limit:.2f}) reached"}
+
         if mode == "paper":
             if wallet.current_balance < amount:
                 return {"success": False, "error": "Insufficient balance"}

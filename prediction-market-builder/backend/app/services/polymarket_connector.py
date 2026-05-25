@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -187,6 +188,3 @@ class PolymarketConnector(ExchangeConnector):
         if self._client:
             await self._client.aclose()
             self._client = None
-
-
-import asyncio

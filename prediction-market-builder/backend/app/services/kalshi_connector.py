@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -178,6 +179,3 @@ class KalshiConnector(ExchangeConnector):
         if self._client:
             await self._client.aclose()
             self._client = None
-
-
-import asyncio

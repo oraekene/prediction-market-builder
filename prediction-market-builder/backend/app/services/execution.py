@@ -1,4 +1,5 @@
-﻿import logging
+﻿import asyncio
+import logging
 import random
 from typing import Any, Literal
 
@@ -184,7 +185,6 @@ class ExecutionEngine:
 
     async def monitor_order(self, platform: str, platform_order_id: str,
                             max_wait: int = 60, poll_interval: int = 2) -> FillResult:
-        import asyncio
         elapsed = 0
         while elapsed < max_wait:
             result = await self.get_order_status(platform, platform_order_id)

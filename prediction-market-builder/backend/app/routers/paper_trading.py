@@ -119,11 +119,14 @@ async def place_order(
     )
 
     if not result["success"]:
-        return {
+        resp = {
             "success": False,
             "error": result.get("error", "Order failed"),
             "violations": result.get("violations"),
         }
+        if result.get("need_confirmation"):
+            resp["need_confirmation"] = True
+        return resp
 
     return result
 
@@ -238,3 +241,28 @@ async def compare_strategies(
         raise HTTPException(status_code=400, detail="At least one strategy_id required")
     comparisons = await service.compare_strategies(ids, session)
     return {"comparisons": comparisons}
+
+
+@router.post("/confirm-live")
+async def confirm_live(
+    current_user: User = Depends(get_current_user),
+):
+    result = await service.confirm_live(current_user.id)
+    return result
+
+
+@router.post("/kill-switch")
+async def kill_switch(
+    user_id: str = "default",
+    session: AsyncSession = Depends(get_session),
+):
+    result = await service.kill_switch(session, user_id)
+    return result
+
+
+@router.get("/connection-test")
+async def connection_test(
+    platform: str = "polymarket",
+):
+    ok = await service.live_connection_ok(platform)
+    return {"platform": platform, "available": ok}

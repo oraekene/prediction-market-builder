@@ -1,7 +1,7 @@
 """Integration + E2E tests for Task 4.1: Production Execution Engine.
 
 Tests paper trading endpoints, trading mode toggle,
-and connector integration through the full FastAPI stack.
+connector integration, and safety guards through the full FastAPI stack.
 """
 import pytest
 from httpx import AsyncClient
@@ -139,3 +139,74 @@ class TestExecutionConnectorIntegration:
         orders = await client.get("/api/paper/orders", headers=headers)
         assert orders.status_code == 200
         assert "orders" in orders.json()
+
+
+class TestExecutionSafetyGuards:
+    """Tests for safety guard features (kill switch, confirm-live, etc.)."""
+
+    @pytest.mark.asyncio
+    async def test_live_trade_needs_confirmation(self, client: AsyncClient):
+        reg = await client.post("/api/auth/register", json={
+            "email": "confirm@test.com", "password": "strongpass123",
+        })
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        wallet = await client.get("/api/paper/wallet", headers=headers)
+        wallet_id = wallet.json()["id"]
+
+        resp = await client.post("/api/paper/orders", headers=headers, json={
+            "wallet_id": wallet_id, "platform": "polymarket",
+            "market_id": "m1", "side": "buy", "amount": 100, "price": 0.55, "mode": "live",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data.get("need_confirmation") is True
+
+    @pytest.mark.asyncio
+    async def test_confirm_live_endpoint(self, client: AsyncClient):
+        reg = await client.post("/api/auth/register", json={
+            "email": "confirm-live@test.com", "password": "strongpass123",
+        })
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        resp = await client.post("/api/paper/confirm-live", headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["confirmed"] is True
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_endpoint(self, client: AsyncClient):
+        reg = await client.post("/api/auth/register", json={
+            "email": "kill@test.com", "password": "strongpass123",
+        })
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        wallet = await client.get("/api/paper/wallet", headers=headers)
+        wallet_id = wallet.json()["id"]
+
+        await client.post("/api/paper/orders", headers=headers, json={
+            "wallet_id": wallet_id, "platform": "polymarket",
+            "market_id": "m1", "side": "buy", "amount": 500, "price": 0.5, "mode": "paper",
+        })
+
+        resp = await client.post("/api/paper/kill-switch", params={"user_id": "kill@test.com"}, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "all_orders_cancelled"
+
+    @pytest.mark.asyncio
+    async def test_connection_test_endpoint(self, client: AsyncClient):
+        reg = await client.post("/api/auth/register", json={
+            "email": "conn-test@test.com", "password": "strongpass123",
+        })
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = await client.get("/api/paper/connection-test", params={"platform": "polymarket"}, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["platform"] == "polymarket"
+        assert isinstance(data["available"], bool)

@@ -657,7 +657,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Create ExchangeBase abstract class** in `exchange_base.py`
+- [x] **Step 1: Create ExchangeBase abstract class** in `exchange_base.py`
   ```python
   from abc import ABC, abstractmethod
   from typing import Any
@@ -690,7 +690,7 @@
       async def available(self) -> bool: ...
   ```
 
-- [ ] **Step 2: Write PolymarketConnector** in `polymarket_connector.py`
+- [x] **Step 2: Write PolymarketConnector** in `polymarket_connector.py`
   - Inherits from `ExchangeConnector`
   - CLOB API v4 integration:
     - `GET /books` — order book
@@ -704,7 +704,7 @@
   - Error handling: nonce errors (re-sign with new nonce), insufficient balance, market not found
   - WebSocket: connect to CLOB websocket for real-time order events (filled, cancelled, failed)
 
-- [ ] **Step 3: Write tests** for Polymarket connector
+- [x] **Step 3: Write tests** for Polymarket connector
   - Test order book fetching with mock httpx
   - Test order submission with mock signing
   - Test error handling for each error type
@@ -722,13 +722,13 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write KalshiConnector**
+- [x] **Step 1: Write KalshiConnector**
   - REST API v2: `/trade-api/v2/portfolio/order`, `/market/{ticker}`, etc.
   - Auth: RSA key pair signing (Kalshi uses RSA-SHA256 for API auth)
   - Order types: limit, market, stop-loss
   - REST-only (Kalshi WebSocket not needed for execution)
 
-- [ ] **Step 2: Write DriftConnector**
+- [x] **Step 2: Write DriftConnector**
   - Drift protocol API endpoints
   - Auth: API key in headers
   - Order types: limit, market
@@ -744,49 +744,9 @@
 
 **Steps:**
 
-- [ ] **Step 1: Refactor ExecutionEngine**
-  ```python
-  class ExecutionEngine:
-      def __init__(self, encryption: EncryptionService):
-          self.connectors = {
-              "polymarket": PolymarketConnector(),
-              "kalshi": KalshiConnector(),
-              "drift": DriftConnector(),
-          }
-
-      async def place_order(self, platform: str, market_id: str, side: str,
-                           amount: float, price: float, user_id: str) -> dict:
-          # Get user's decrypted API key from EncryptionService
-          # Create ExchangeOrder
-          # Route to appropriate connector
-          # Submit order
-          # Track in DB (order_id, platform_order_id, status, timestamp)
-          # Return execution result
-
-      async def get_order_book(self, platform: str, market_id: str) -> dict:
-          # Real order book from exchange API
-          # Return {bids: [{price, size}], asks: [{price, size}], spread, mid_price}
-
-      async def calculate_slippage(self, platform: str, market_id: str,
-                                    amount: float, side: str) -> dict:
-          # Get real order book
-          # Simulate walking the book for given amount
-          # Return {estimated_slippage, price_impact, filled_price}
-
-      async def monitor_order(self, order_id: str) -> dict:
-          # Poll exchange for order status (every 2s, up to 60s)
-          # Update DB on status change
-          # Return final status: filled/partial/cancelled/failed
-  ```
-  - Keep `SimulatedExecutionEngine` as a fallback for paper trading
-  - Add `mode: Literal["paper", "live"]` to switch between engines
-
-- [ ] **Step 2: Real slippage calculator**
-  - Walk the order book: for a buy order, consume asks from best to worst until amount filled
-  - Impact cost = (execution_price - mid_price) / mid_price
-  - Return: estimated_slippage, price_impact, fill_curve (list of {price, cumulative_amount} pairs)
-
-- [ ] **Step 3: Transaction monitoring**
+- [x] **Step 1: Refactor ExecutionEngine**
+- [x] **Step 2: Real slippage calculator**
+- [x] **Step 3: Transaction monitoring**
   - After order submission, poll status every 2s
   - Max wait: 120s for CLOB orders, 300s for on-chain
   - On timeout: mark as "pending_review" (don't assume failed — exchange might have accepted)
@@ -802,17 +762,17 @@
 
 **Steps:**
 
-- [ ] **Step 1: Paper trading mode toggle**
+- [x] **Step 1: Paper trading mode toggle**
   - Add per-user `trading_mode` preference: "paper" | "live"
   - Paper mode uses `SimulatedExecutionEngine`
   - Live mode uses `ExecutionEngine` with real exchange connectors
   - Always allow paper mode regardless of real keys
 
-- [ ] **Step 2: Safety guards**
-  - Require explicit confirmation before first live trade
+- [x] **Step 2: Safety guards**
+  - Require explicit confirmation before first live trade (`POST /api/paper/confirm-live`)
   - Max loss limit per-session (configurable, default $100)
-  - Kill switch: endpoint to cancel all open orders across all platforms
-  - Require successful connection test before allowing live trading
+  - Kill switch: endpoint to cancel all open orders across all platforms (`POST /api/paper/kill-switch`)
+  - Require successful connection test before allowing live trading (`GET /api/paper/connection-test`)
 
 ---
 
