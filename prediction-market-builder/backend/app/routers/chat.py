@@ -1,9 +1,11 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 import json
 
 from app.ai.hermes_sidecar import HermesSidecar
+from app.routers.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
+ws_router = APIRouter()
 hermes = HermesSidecar()
 
 
@@ -32,7 +34,7 @@ class ChatManager:
 chat_manager = ChatManager()
 
 
-@router.websocket("/ws/chat")
+@ws_router.websocket("/ws/chat")
 async def chat_endpoint(websocket: WebSocket):
     await chat_manager.connect(websocket)
     try:

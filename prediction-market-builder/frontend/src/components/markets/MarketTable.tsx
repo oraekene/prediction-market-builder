@@ -21,9 +21,6 @@ export default function MarketTable() {
   const [activeCategory, setActiveCategory] = useState('All')
   const { data, isLoading, error } = useMarkets()
 
-  if (isLoading) return <div className="text-gray-400">Loading markets...</div>
-  if (error) return <div className="text-red-400">Error loading markets</div>
-
   const filteredMarkets = useMemo(() => {
     const markets = data?.markets ?? []
     return markets.filter((m: MarketItem) => {
@@ -44,6 +41,9 @@ export default function MarketTable() {
       : 0,
     [filteredMarkets],
   )
+
+  if (isLoading) return <div className="text-gray-400">Loading markets...</div>
+  if (error) return <div className="text-red-400">Error loading markets</div>
 
   return (
     <div>
