@@ -8,14 +8,14 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestResearchE2E:
-    async def test_research_full_lifecycle(self, client):
+    async def test_research_full_lifecycle(self, authenticated_client):
         # a. Configure research preset and concurrency
-        resp = await client.put("/api/research/config?preset=sharpe_max&max_concurrent=2")
+        resp = await authenticated_client.put("/api/research/config?preset=sharpe_max&max_concurrent=2")
         assert resp.status_code == 200
         assert resp.json()["status"] == "updated"
 
         # b. Read back config and verify values
-        resp = await client.get("/api/research/config")
+        resp = await authenticated_client.get("/api/research/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["preset"] == "sharpe_max"
@@ -24,7 +24,7 @@ class TestResearchE2E:
         assert "max_hypotheses_per_session" in data
 
         # c. Get aggregate stats and verify structure
-        resp = await client.get("/api/research/stats")
+        resp = await authenticated_client.get("/api/research/stats")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_sessions"] == 0
@@ -36,7 +36,7 @@ class TestResearchE2E:
         assert "keep_rate" in data
 
         # d. Get market climate and verify regime
-        resp = await client.get("/api/research/climate")
+        resp = await authenticated_client.get("/api/research/climate")
         assert resp.status_code == 200
         data = resp.json()
         assert data["regime"] == "calm"
@@ -50,7 +50,7 @@ class TestResearchE2E:
         except ImportError:
             _tabpfn_available = False
         if _tabpfn_available:
-            resp = await client.get("/api/research/features")
+            resp = await authenticated_client.get("/api/research/features")
             assert resp.status_code == 200
             data = resp.json()
             assert "features" in data
@@ -60,7 +60,7 @@ class TestResearchE2E:
             fpath = os.path.join(tmpdir, "test.txt")
             with open(fpath, "w") as f:
                 f.write("oracle-lag and slippage-limit are key signals")
-            resp = await client.post(
+            resp = await authenticated_client.post(
                 "/api/research/rlm-scan",
                 params={
                     "source_type": "forum",
@@ -75,7 +75,7 @@ class TestResearchE2E:
             scan_id = data["alpha_vector_id"]
 
         # g. List alpha vectors and verify the scan result is present
-        resp = await client.get("/api/research/alpha-vectors")
+        resp = await authenticated_client.get("/api/research/alpha-vectors")
         assert resp.status_code == 200
         data = resp.json()
         assert "vectors" in data
@@ -83,15 +83,15 @@ class TestResearchE2E:
         assert any(v["id"] == scan_id for v in data["vectors"])
 
         # h. Verify config values persist across calls
-        resp = await client.get("/api/research/config")
+        resp = await authenticated_client.get("/api/research/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["preset"] == "sharpe_max"
         assert data["max_concurrent"] == 2
 
-    async def test_research_config_persistence(self, client):
+    async def test_research_config_persistence(self, authenticated_client):
         # PUT config with all supported fields
-        resp = await client.put(
+        resp = await authenticated_client.put(
             "/api/research/config",
             params={
                 "preset": "win_rate_max",
@@ -106,7 +106,7 @@ class TestResearchE2E:
         assert resp.json()["status"] == "updated"
 
         # GET config and verify every field matches
-        resp = await client.get("/api/research/config")
+        resp = await authenticated_client.get("/api/research/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["preset"] == "win_rate_max"

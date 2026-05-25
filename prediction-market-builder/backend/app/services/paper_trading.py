@@ -87,7 +87,7 @@ class PaperTradingService:
             risk_mgr = RiskManager(profile)
             estimated_edge = 0.05
             belief_probability = min(0.99, max(0.01, price + estimated_edge if side in ("buy", "yes") else 1 - price + estimated_edge))
-            risk_result = risk_mgr.evaluate_trade(
+            risk_result = await risk_mgr.evaluate_trade(
                 {"current_odds": price, "platform": platform, "platform_market_id": market_id},
                 {"probability": belief_probability, "market_odds": price, "confidence": 0.7},
                 {"current_capital": wallet.current_balance, "positions": []},

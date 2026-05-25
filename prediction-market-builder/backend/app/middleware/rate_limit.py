@@ -1,8 +1,9 @@
 import time
 from collections import defaultdict
 
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -22,7 +23,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < window]
 
         if len(self._requests[client_ip]) >= self.requests_per_minute:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."},
+            )
 
         self._requests[client_ip].append(now)
         return await call_next(request)

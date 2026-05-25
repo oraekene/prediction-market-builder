@@ -27,7 +27,7 @@ async def evaluate_trade(body: dict):
     signal = body.get("signal", {})
     portfolio = body.get("portfolio", {})
 
-    result = mgr.evaluate_trade(market, signal, portfolio)
+    result = await mgr.evaluate_trade(market, signal, portfolio)
     return result
 
 
@@ -48,7 +48,7 @@ async def create_trade(body: dict, session: AsyncSession = Depends(get_session))
     market = body.get("market", {})
     signal = body.get("signal", {})
     portfolio = body.get("portfolio", {})
-    risk_result = mgr.evaluate_trade(market, signal, portfolio)
+    risk_result = await mgr.evaluate_trade(market, signal, portfolio)
 
     if not risk_result["approved"]:
         return {

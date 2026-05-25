@@ -1,7 +1,7 @@
 from unittest.mock import Mock, AsyncMock
 
 import pytest
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.datastructures import URL, Headers
 
 from app.middleware.rate_limit import RateLimitMiddleware
@@ -41,10 +41,9 @@ async def test_rate_limit_blocks_excess():
         req = _make_request()
         await middleware.dispatch(req, app_mock)
 
-    with pytest.raises(HTTPException) as exc:
-        req = _make_request()
-        await middleware.dispatch(req, app_mock)
-    assert exc.value.status_code == 429
+    req = _make_request()
+    resp = await middleware.dispatch(req, app_mock)
+    assert resp.status_code == 429
 
 
 @pytest.mark.asyncio
@@ -74,8 +73,8 @@ async def test_rate_limit_per_ip():
     await middleware.dispatch(req_a2, app_mock)
     await middleware.dispatch(req_b, app_mock)
 
-    with pytest.raises(HTTPException):
-        await middleware.dispatch(req_a1, app_mock)
+    resp = await middleware.dispatch(req_a1, app_mock)
+    assert resp.status_code == 429
 
     resp = await middleware.dispatch(req_b, app_mock)
     assert resp == "ok"

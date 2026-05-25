@@ -306,8 +306,8 @@ async def test_get_performance_with_trades(session, wallet, service, filled_orde
 # --- Endpoint tests ---
 
 @pytest.mark.asyncio
-async def test_get_wallet_endpoint(client):
-    resp = await client.get("/api/paper/wallet?user_id=ep-user")
+async def test_get_wallet_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user")
     assert resp.status_code == 200
     data = resp.json()
     assert data["initial_balance"] == 10000.0
@@ -315,11 +315,11 @@ async def test_get_wallet_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_place_and_list_order_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user2")
+async def test_place_and_list_order_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user2")
     wallet_id = wallet_resp.json()["id"]
 
-    order_resp = await client.post("/api/paper/orders", json={
+    order_resp = await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id,
         "platform": "polymarket",
         "market_id": "ep-mkt-1",
@@ -329,23 +329,23 @@ async def test_place_and_list_order_endpoint(client):
     })
     assert order_resp.status_code == 200
 
-    list_resp = await client.get(f"/api/paper/orders?wallet_id={wallet_id}")
+    list_resp = await authenticated_client.get(f"/api/paper/orders?wallet_id={wallet_id}")
     assert list_resp.status_code == 200
     data = list_resp.json()
     assert data["total"] >= 1
 
 
 @pytest.mark.asyncio
-async def test_sync_resolutions_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user3")
+async def test_sync_resolutions_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user3")
     wallet_id = wallet_resp.json()["id"]
-    await client.post("/api/paper/orders", json={
+    await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id, "platform": "polymarket",
         "market_id": "ep-mkt-sync", "side": "buy",
         "amount": 100.0, "price": 0.65,
     })
 
-    sync_resp = await client.post("/api/paper/sync-resolutions", json={
+    sync_resp = await authenticated_client.post("/api/paper/sync-resolutions", json={
         "resolutions": [{"market_id": "ep-mkt-sync", "platform": "polymarket", "outcome": "yes"}],
     })
     assert sync_resp.status_code == 200
@@ -354,77 +354,77 @@ async def test_sync_resolutions_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user4")
+async def test_metrics_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user4")
     wallet_id = wallet_resp.json()["id"]
-    await client.post("/api/paper/orders", json={
+    await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id, "platform": "polymarket",
         "market_id": "ep-mkt-m1", "side": "buy",
         "amount": 100.0, "price": 0.55,
     })
 
-    metric_resp = await client.get("/api/paper/metrics/current_balance")
+    metric_resp = await authenticated_client.get("/api/paper/metrics/current_balance")
     assert metric_resp.status_code == 200
     data = metric_resp.json()
     assert data["metric"] == "current_balance"
 
 
 @pytest.mark.asyncio
-async def test_performance_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user5")
+async def test_performance_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user5")
     wallet_id = wallet_resp.json()["id"]
-    await client.post("/api/paper/orders", json={
+    await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id, "platform": "polymarket",
         "market_id": "ep-mkt-p1", "side": "buy",
         "amount": 100.0, "price": 0.55,
     })
 
-    perf_resp = await client.get("/api/paper/performance?user_id=ep-user5")
+    perf_resp = await authenticated_client.get("/api/paper/performance?user_id=ep-user5")
     assert perf_resp.status_code == 200
     data = perf_resp.json()
     assert "total_trades" in data
 
 
 @pytest.mark.asyncio
-async def test_compare_endpoint(client):
-    resp = await client.get("/api/paper/compare?strategy_ids=strat-1,strat-2")
+async def test_compare_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/paper/compare?strategy_ids=strat-1,strat-2")
     assert resp.status_code == 200
     data = resp.json()
     assert "comparisons" in data
 
 
 @pytest.mark.asyncio
-async def test_compare_empty_strategy_ids_returns_400(client):
-    resp = await client.get("/api/paper/compare?strategy_ids=")
+async def test_compare_empty_strategy_ids_returns_400(authenticated_client):
+    resp = await authenticated_client.get("/api/paper/compare?strategy_ids=")
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_delete_order_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user6")
+async def test_delete_order_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user6")
     wallet_id = wallet_resp.json()["id"]
-    order_resp = await client.post("/api/paper/orders", json={
+    order_resp = await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id, "platform": "polymarket",
         "market_id": "ep-mkt-del", "side": "buy",
         "amount": 100.0, "price": 0.55,
     })
     order_id = order_resp.json()["order"]["id"]
 
-    del_resp = await client.delete(f"/api/paper/orders/{order_id}")
+    del_resp = await authenticated_client.delete(f"/api/paper/orders/{order_id}")
     assert del_resp.status_code in (200, 400)
 
 
 @pytest.mark.asyncio
-async def test_reset_wallet_endpoint(client):
-    wallet_resp = await client.get("/api/paper/wallet?user_id=ep-user7")
+async def test_reset_wallet_endpoint(authenticated_client):
+    wallet_resp = await authenticated_client.get("/api/paper/wallet?user_id=ep-user7")
     wallet_id = wallet_resp.json()["id"]
-    await client.post("/api/paper/orders", json={
+    await authenticated_client.post("/api/paper/orders", json={
         "wallet_id": wallet_id, "platform": "polymarket",
         "market_id": "ep-mkt-r1", "side": "buy",
         "amount": 100.0, "price": 0.55,
     })
 
-    reset_resp = await client.post("/api/paper/wallet/reset?user_id=ep-user7")
+    reset_resp = await authenticated_client.post("/api/paper/wallet/reset?user_id=ep-user7")
     assert reset_resp.status_code == 200
     data = reset_resp.json()
     assert data["success"] is True

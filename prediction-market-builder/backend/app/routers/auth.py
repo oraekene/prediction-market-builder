@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import logging
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,7 @@ def _create_token(user_id: str, token_type: str = "access") -> str:
     payload = {
         "sub": user_id,
         "type": token_type,
+        "jti": str(uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=expire),
     }

@@ -9,27 +9,30 @@ def test_engine_registry_has_performance_handler():
     assert handler is not None
 
 
-def test_engine_evaluate_runs_performance_node():
+@pytest.mark.asyncio
+async def test_engine_evaluate_runs_performance_node():
     engine = StrategyEngine()
     ctx = ExecutionContext(performance_snapshot={"sharpe": 2.5})
     nodes = [
         {"id": "p1", "type": "performance", "position": {"x": 0, "y": 0}, "data": {"metric": "sharpe"}},
     ]
-    result = engine.evaluate(nodes, [], ctx)
+    result = await engine.evaluate(nodes, [], ctx)
     assert result["value"] == 2.5
     assert result["metric"] == "sharpe"
 
 
-def test_engine_evaluate_with_default_context():
+@pytest.mark.asyncio
+async def test_engine_evaluate_with_default_context():
     engine = StrategyEngine()
     nodes = [
         {"id": "p1", "type": "performance", "position": {"x": 0, "y": 0}, "data": {"metric": "sharpe"}},
     ]
-    result = engine.evaluate(nodes, [])
+    result = await engine.evaluate(nodes, [])
     assert "value" in result
 
 
-def test_engine_evaluate_with_threshold_and_performance():
+@pytest.mark.asyncio
+async def test_engine_evaluate_with_threshold_and_performance():
     engine = StrategyEngine()
     ctx = ExecutionContext(performance_snapshot={"sharpe": 2.5})
     nodes = [
@@ -37,7 +40,7 @@ def test_engine_evaluate_with_threshold_and_performance():
         {"id": "t1", "type": "threshold_condition", "position": {"x": 100, "y": 0}, "data": {"field": "current_odds", "operator": "gt", "threshold": 0.5}},
     ]
     edges = [{"id": "e1", "source": "p1", "target": "t1"}]
-    result = engine.evaluate(nodes, edges, ctx)
+    result = await engine.evaluate(nodes, edges, ctx)
     assert result is not None
 
 

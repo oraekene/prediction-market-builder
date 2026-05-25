@@ -35,13 +35,13 @@ class LanceDBManager:
                 pa.field("metadata", pa.string()),
             ])
             table = self.db.create_table("market_vectors", schema=schema)
-            table.create_index("embedding", metric="cosine", num_partitions=256, num_sub_vectors=96)
+            table.create_index(metric="cosine", num_partitions=256, num_sub_vectors=96, vector_column_name="embedding")
         else:
             table = self.db.open_table("market_vectors")
             existing = [i for i in (table.list_indices() or [])]
             if not existing:
                 try:
-                    table.create_index("embedding", metric="cosine", num_partitions=256, num_sub_vectors=96)
+                    table.create_index(metric="cosine", num_partitions=256, num_sub_vectors=96, vector_column_name="embedding")
                 except Exception:
                     pass
 

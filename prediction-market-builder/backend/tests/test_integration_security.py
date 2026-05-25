@@ -25,7 +25,7 @@ class TestRateLimiterIntegration:
     """Integration: rate limiter middleware blocks excess requests."""
 
     @pytest.mark.asyncio
-    async def test_rate_limit_on_auth_endpoint(self, client: AsyncClient):
+    async def test_rate_limit_on_auth_endpoint(self, client: AsyncClient, low_rate_limit):
         login_payload = {"email": "spam@test.com", "password": "password123"}
         for _ in range(3):
             resp = await client.post("/api/auth/login", json=login_payload)

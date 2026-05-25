@@ -3,7 +3,8 @@ from app.services.node_executor import NodeRegistry, GraphExecutor, ExecutionCon
 from app.services.performance_node_handlers import handle_performance_metric
 
 
-def test_cycle_detection_returns_error():
+@pytest.mark.asyncio
+async def test_cycle_detection_returns_error():
     registry = NodeRegistry()
     registry.register("noop", lambda n, i, c: {"result": 1})
     executor = GraphExecutor(registry)
@@ -15,11 +16,12 @@ def test_cycle_detection_returns_error():
         {"id": "e1", "source": "a", "target": "b"},
         {"id": "e2", "source": "b", "target": "a"},
     ]
-    result = executor.execute(nodes, edges, ExecutionContext())
+    result = await executor.execute(nodes, edges, ExecutionContext())
     assert "error" in result or "Cycle detected" in str(result)
 
 
-def test_self_loop_detected():
+@pytest.mark.asyncio
+async def test_self_loop_detected():
     registry = NodeRegistry()
     registry.register("noop", lambda n, i, c: {"result": 1})
     executor = GraphExecutor(registry)
@@ -29,7 +31,7 @@ def test_self_loop_detected():
     edges = [
         {"id": "e1", "source": "a", "target": "a"},
     ]
-    result = executor.execute(nodes, edges, ExecutionContext())
+    result = await executor.execute(nodes, edges, ExecutionContext())
     assert "Cycle detected" in str(result)
 
 
@@ -49,7 +51,8 @@ def test_handle_performance_metric_missing_metric_returns_none():
     assert result["metric"] == "sortino"
 
 
-def test_performance_node_in_executor():
+@pytest.mark.asyncio
+async def test_performance_node_in_executor():
     registry = NodeRegistry()
     registry.register("performance", handle_performance_metric)
     executor = GraphExecutor(registry)
@@ -57,12 +60,13 @@ def test_performance_node_in_executor():
     nodes = [
         {"id": "p1", "type": "performance", "position": {"x": 0, "y": 0}, "data": {"metric": "win_rate"}},
     ]
-    result = executor.execute(nodes, [], ctx)
+    result = await executor.execute(nodes, [], ctx)
     assert result["value"] == 0.65
     assert result["metric"] == "win_rate"
 
 
-def test_performance_node_with_empty_snapshot():
+@pytest.mark.asyncio
+async def test_performance_node_with_empty_snapshot():
     registry = NodeRegistry()
     registry.register("performance", handle_performance_metric)
     executor = GraphExecutor(registry)
@@ -70,5 +74,5 @@ def test_performance_node_with_empty_snapshot():
     nodes = [
         {"id": "p1", "type": "performance", "position": {"x": 0, "y": 0}, "data": {"metric": "sharpe"}},
     ]
-    result = executor.execute(nodes, [], ctx)
+    result = await executor.execute(nodes, [], ctx)
     assert result["value"] is None

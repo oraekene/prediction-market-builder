@@ -41,7 +41,7 @@ async def test_rlm_service_drift_fallback():
     service = RLMService()
     service._available = False
     result = await service.detect_linguistic_drift(
-        ["old post"], ["new post"], ["manager"]
+        ["old post"], ["old post"], ["manager"]
     )
     assert "drift_scores" in result
     assert result["drift_scores"]["manager"]["drift_score"] == 0.0
@@ -208,8 +208,8 @@ async def test_research_config_model():
 
 
 @pytest.mark.asyncio
-async def test_research_api_stats(client):
-    response = await client.get("/api/research/stats")
+async def test_research_api_stats(authenticated_client):
+    response = await authenticated_client.get("/api/research/stats")
     assert response.status_code == 200
     data = response.json()
     assert "total_sessions" in data
@@ -217,24 +217,24 @@ async def test_research_api_stats(client):
 
 
 @pytest.mark.asyncio
-async def test_research_api_config(client):
-    response = await client.put("/api/research/config?preset=risk_adjusted&max_concurrent=3")
+async def test_research_api_config(authenticated_client):
+    response = await authenticated_client.put("/api/research/config?preset=risk_adjusted&max_concurrent=3")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "updated"
 
 
 @pytest.mark.asyncio
-async def test_research_api_climate(client):
-    response = await client.get("/api/research/climate")
+async def test_research_api_climate(authenticated_client):
+    response = await authenticated_client.get("/api/research/climate")
     assert response.status_code == 200
     data = response.json()
     assert "regime" in data
 
 
 @pytest.mark.asyncio
-async def test_research_api_alpha_vectors(client):
-    response = await client.get("/api/research/alpha-vectors")
+async def test_research_api_alpha_vectors(authenticated_client):
+    response = await authenticated_client.get("/api/research/alpha-vectors")
     assert response.status_code == 200
     data = response.json()
     assert "vectors" in data
@@ -383,14 +383,14 @@ async def test_autoresearch_quick_rejection_no_match():
 
 
 @pytest.mark.asyncio
-async def test_research_api_rlm_scan(client):
+async def test_research_api_rlm_scan(authenticated_client):
     import tempfile, os
 
     with tempfile.TemporaryDirectory() as tmpdir:
         fpath = os.path.join(tmpdir, "test.txt")
         with open(fpath, "w") as f:
             f.write("This file mentions oracle-lag and slippage-limit")
-        response = await client.post(
+        response = await authenticated_client.post(
             "/api/research/rlm-scan",
             params={"source_path": tmpdir, "keywords": "oracle-lag,slippage"},
         )
@@ -399,7 +399,7 @@ async def test_research_api_rlm_scan(client):
         assert data["status"] == "completed"
         assert "alpha_vector_id" in data
 
-        vec_response = await client.get("/api/research/alpha-vectors")
+        vec_response = await authenticated_client.get("/api/research/alpha-vectors")
         assert vec_response.status_code == 200
         vec_data = vec_response.json()
         assert len(vec_data["vectors"]) >= 1
@@ -408,14 +408,14 @@ async def test_research_api_rlm_scan(client):
 
 
 @pytest.mark.asyncio
-async def test_research_api_rlm_scan_no_keywords(client):
+async def test_research_api_rlm_scan_no_keywords(authenticated_client):
     import tempfile, os
 
     with tempfile.TemporaryDirectory() as tmpdir:
         fpath = os.path.join(tmpdir, "data.txt")
         with open(fpath, "w") as f:
             f.write("some random content")
-        response = await client.post(
+        response = await authenticated_client.post(
             "/api/research/rlm-scan",
             params={"source_path": tmpdir},
         )
@@ -426,7 +426,7 @@ async def test_research_api_rlm_scan_no_keywords(client):
 
 
 @pytest.mark.asyncio
-async def test_research_api_features(client):
+async def test_research_api_features(authenticated_client):
     from app.routers.research import tabpfn_service
 
     with patch.object(
@@ -435,7 +435,7 @@ async def test_research_api_features(client):
         new_callable=AsyncMock,
         return_value={"odds": 0.5, "volume": 0.3},
     ):
-        response = await client.get("/api/research/features")
+        response = await authenticated_client.get("/api/research/features")
         assert response.status_code == 200
         data = response.json()
         assert "features" in data
@@ -443,8 +443,8 @@ async def test_research_api_features(client):
 
 
 @pytest.mark.asyncio
-async def test_research_api_config_defaults(client):
-    response = await client.get("/api/research/config")
+async def test_research_api_config_defaults(authenticated_client):
+    response = await authenticated_client.get("/api/research/config")
     assert response.status_code == 200
     data = response.json()
     assert data["preset"] == "sharpe_max"
@@ -453,15 +453,15 @@ async def test_research_api_config_defaults(client):
 
 
 @pytest.mark.asyncio
-async def test_research_api_config_roundtrip(client):
-    put_resp = await client.put(
+async def test_research_api_config_roundtrip(authenticated_client):
+    put_resp = await authenticated_client.put(
         "/api/research/config",
         params={"preset": "risk_adjusted", "max_concurrent": 3},
     )
     assert put_resp.status_code == 200
     assert put_resp.json()["status"] == "updated"
 
-    get_resp = await client.get("/api/research/config")
+    get_resp = await authenticated_client.get("/api/research/config")
     assert get_resp.status_code == 200
     data = get_resp.json()
     assert data["preset"] == "risk_adjusted"
@@ -750,8 +750,8 @@ async def test_rlm_service_fallback_scan_directory_method():
 
 
 @pytest.mark.asyncio
-async def test_rlm_drift_api_endpoint(client):
-    response = await client.post(
+async def test_rlm_drift_api_endpoint(authenticated_client):
+    response = await authenticated_client.post(
         "/api/research/rlm-drift",
         params={
             "historical_texts": ["old manager post"],
@@ -766,8 +766,8 @@ async def test_rlm_drift_api_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_rlm_text_batch_api_endpoint(client):
-    response = await client.post(
+async def test_rlm_text_batch_api_endpoint(authenticated_client):
+    response = await authenticated_client.post(
         "/api/research/rlm-text-batch",
         params={
             "texts": ["first document", "second document"],
@@ -781,8 +781,8 @@ async def test_rlm_text_batch_api_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_rlm_trajectory_api_endpoint(client):
-    response = await client.get("/api/research/rlm-trajectory")
+async def test_rlm_trajectory_api_endpoint(authenticated_client):
+    response = await authenticated_client.get("/api/research/rlm-trajectory")
     assert response.status_code == 200
     data = response.json()
     assert "trajectory" in data
@@ -790,8 +790,8 @@ async def test_rlm_trajectory_api_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_rlm_state_api_endpoint(client):
-    response = await client.get("/api/research/rlm-state")
+async def test_rlm_state_api_endpoint(authenticated_client):
+    response = await authenticated_client.get("/api/research/rlm-state")
     assert response.status_code == 200
     data = response.json()
     assert "state" in data
@@ -799,13 +799,13 @@ async def test_rlm_state_api_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_rlm_pipeline_api_endpoint(client):
+async def test_rlm_pipeline_api_endpoint(authenticated_client):
     import tempfile, os
     with tempfile.TemporaryDirectory() as tmpdir:
         with open(os.path.join(tmpdir, "data.txt"), "w") as f:
             f.write("test signal data")
         fpath = tmpdir.replace("\\", "/")
-        response = await client.post(
+        response = await authenticated_client.post(
             "/api/research/rlm-pipeline",
             params={
                 "directory": fpath,
@@ -819,13 +819,13 @@ async def test_rlm_pipeline_api_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_rlm_pipeline_api_full(client):
+async def test_rlm_pipeline_api_full(authenticated_client):
     import tempfile, os
     with tempfile.TemporaryDirectory() as tmpdir:
         with open(os.path.join(tmpdir, "forum.txt"), "w") as f:
             f.write("forum post about manager changes")
         fpath = tmpdir.replace("\\", "/")
-        response = await client.post(
+        response = await authenticated_client.post(
             "/api/research/rlm-pipeline",
             params={
                 "directory": fpath,

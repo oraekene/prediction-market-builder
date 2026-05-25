@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+
 from pathlib import Path
 
 from fastapi import FastAPI, Depends
@@ -131,7 +131,6 @@ watchdog.on_unhealthy(_on_unhealthy_handler)
 watchdog.on_recovery(_on_recovery_handler)
 
 
-@asynccontextmanager
 async def _migrate_passwords():
     from app.database import async_session
     from app.models.user import User
@@ -342,7 +341,8 @@ app.include_router(strategies.router, dependencies=[Depends(get_current_user)])
 app.include_router(chat.router, dependencies=[Depends(get_current_user)])
 app.include_router(portfolio.router, dependencies=[Depends(get_current_user)])
 app.include_router(analytics.router, dependencies=[Depends(get_current_user)])
-app.include_router(research.router, dependencies=[Depends(get_current_user)])
+app.include_router(research.router)
+app.include_router(research.ws_router)
 app.include_router(risk.router, dependencies=[Depends(get_current_user)])
 app.include_router(orchestrator.router, dependencies=[Depends(get_current_user)])
 app.include_router(repl.router, dependencies=[Depends(get_current_user)])

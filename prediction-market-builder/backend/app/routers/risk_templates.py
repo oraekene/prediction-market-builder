@@ -73,7 +73,7 @@ async def evaluate_risk_template_endpoint(template_id: str, body: dict, session:
     portfolio = body.get("portfolio", {})
     profile = RiskProfile(rules=template.rules)
     mgr = RiskManager(profile)
-    result = mgr.evaluate_trade(market={}, signal=signal, portfolio=portfolio)
+    result = await mgr.evaluate_trade(market={}, signal=signal, portfolio=portfolio)
     return result
 
 

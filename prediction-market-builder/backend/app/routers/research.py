@@ -17,10 +17,12 @@ from app.services.research_scheduler import ResearchScheduler
 from app.ai.market_regime_service import MarketRegimeService
 from app.ai.tabpfn_service import TabPFNService
 from app.ai.rlm_service import RLMService
+from app.routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/research", tags=["research"])
+router = APIRouter(prefix="/api/research", tags=["research"], dependencies=[Depends(get_current_user)])
+ws_router = APIRouter(prefix="/api/research", tags=["research"])
 
 scheduler: ResearchScheduler | None = None
 market_regime_service = MarketRegimeService()
@@ -500,7 +502,7 @@ async def get_rlm_trace(vector_id: str, session: AsyncSession = Depends(get_sess
     }
 
 
-@router.websocket("/ws/research/{session_id}")
+@ws_router.websocket("/ws/research/{session_id}")
 async def research_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
     lock = await _get_ws_lock()

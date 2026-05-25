@@ -5,6 +5,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 
+from app.config import settings
+settings.rate_limit_per_minute = 200
+
 from app.main import app
 from app.database import Base, get_session
 
@@ -50,6 +53,47 @@ async def client():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def authenticated_client():
+    app.dependency_overrides[get_session] = override_get_session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/auth/register", json={
+            "email": "auth-test@test.com",
+            "password": "strongpassword123",
+        })
+        data = resp.json()
+        token = data["access_token"]
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"}
+    ) as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def low_rate_limit():
+    from app.middleware.rate_limit import RateLimitMiddleware
+    stack = app.middleware_stack
+    old_limit = 60
+    while stack:
+        if isinstance(stack, RateLimitMiddleware):
+            old_limit = stack.requests_per_minute
+            stack.requests_per_minute = 3
+            stack._requests.clear()
+            break
+        stack = getattr(stack, "app", None)
+    yield
+    stack = app.middleware_stack
+    while stack:
+        if isinstance(stack, RateLimitMiddleware):
+            stack.requests_per_minute = old_limit
+            break
+        stack = getattr(stack, "app", None)
 
 
 @pytest.fixture

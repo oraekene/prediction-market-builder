@@ -23,6 +23,13 @@ async def e2e_client():
         await conn.run_sync(Base.metadata.create_all)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/auth/register", json={
+            "email": "e2e@test.com",
+            "password": "strongpassword123",
+        })
+        data = resp.json()
+        token = data["access_token"]
+    async with AsyncClient(transport=transport, base_url="http://test", headers={"Authorization": f"Bearer {token}"}) as ac:
         yield ac
     app.dependency_overrides.clear()
     async with test_engine.begin() as conn:

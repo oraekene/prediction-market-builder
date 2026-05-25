@@ -85,8 +85,8 @@ class RiskManager:
         self.risk_calc = RiskCalculator()
         self.portfolio_mgr = PortfolioManager()
 
-    def evaluate_trade(self, market: dict[str, Any], signal: dict[str, Any],
-                       portfolio: dict[str, Any]) -> dict[str, Any]:
+    async def evaluate_trade(self, market: dict[str, Any], signal: dict[str, Any],
+                              portfolio: dict[str, Any]) -> dict[str, Any]:
         if self.profile.rules:
             ctx = ExecutionContext(
                 signal=signal,
@@ -107,10 +107,10 @@ class RiskManager:
                 if cond_node is None:
                     continue
 
-                cond_result = self.executor.execute([cond_node], [], ctx)
+                cond_result = await self.executor.execute([cond_node], [], ctx)
                 if cond_result.get("triggered"):
                     act_node = _action_to_node(action_type, action_params, cond_type)
-                    act_result = self.executor.execute([act_node], [], ctx)
+                    act_result = await self.executor.execute([act_node], [], ctx)
                     return {
                         "approved": act_result.get("approved", False),
                         "suggested_size": act_result.get("suggested_size", 0.0),
@@ -152,7 +152,7 @@ class RiskManager:
         kelly = (p * b - q) / b
         return max(0, kelly * self.profile.kelly_fraction)
 
-    def monitor_positions(self, portfolio: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
+    async def monitor_positions(self, portfolio: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
         positions = portfolio.get("positions", [])
         alerts = []
         for pos in positions:
@@ -167,8 +167,8 @@ class RiskManager:
             )
             sl_node = {"id": "stop_loss_check", "type": "stop_loss", "data": {"stop_loss": self.profile.stop_loss}}
             tp_node = {"id": "take_profit_check", "type": "take_profit", "data": {"take_profit": 0.2}}
-            sl_result = self.executor.execute([sl_node], [], ctx)
-            tp_result = self.executor.execute([tp_node], [], ctx)
+            sl_result = await self.executor.execute([sl_node], [], ctx)
+            tp_result = await self.executor.execute([tp_node], [], ctx)
             if sl_result and sl_result.get("triggered"):
                 alerts.append({
                     "type": "stop_loss",

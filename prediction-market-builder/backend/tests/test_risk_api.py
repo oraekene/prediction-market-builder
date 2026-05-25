@@ -2,8 +2,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_risk_summary_endpoint(client):
-    resp = await client.get("/api/risk/summary")
+async def test_risk_summary_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/risk/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert "var_95" in data
@@ -15,8 +15,8 @@ async def test_risk_summary_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_risk_var_endpoint(client):
-    resp = await client.get("/api/risk/var?confidence=0.95")
+async def test_risk_var_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/risk/var?confidence=0.95")
     assert resp.status_code == 200
     data = resp.json()
     assert "historical" in data
@@ -25,16 +25,16 @@ async def test_risk_var_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_risk_correlation_endpoint(client):
-    resp = await client.get("/api/risk/correlation")
+async def test_risk_correlation_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/risk/correlation")
     assert resp.status_code == 200
     data = resp.json()
     assert "pairs" in data
 
 
 @pytest.mark.asyncio
-async def test_risk_drawdown_endpoint(client):
-    resp = await client.get("/api/risk/drawdown")
+async def test_risk_drawdown_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/risk/drawdown")
     assert resp.status_code == 200
     data = resp.json()
     assert "current_drawdown" in data
@@ -43,8 +43,8 @@ async def test_risk_drawdown_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_risk_portfolio_endpoint(client):
-    resp = await client.get("/api/risk/portfolio")
+async def test_risk_portfolio_endpoint(authenticated_client):
+    resp = await authenticated_client.get("/api/risk/portfolio")
     assert resp.status_code == 200
     data = resp.json()
     assert "positions" in data
