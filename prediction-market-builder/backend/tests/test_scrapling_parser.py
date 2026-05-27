@@ -131,10 +131,12 @@ async def test_close(parser):
 
 @pytest.mark.asyncio
 async def test_parse_url_non_html(parser, monkeypatch):
+    from unittest.mock import MagicMock
     mock_client = AsyncMock()
     mock_response = AsyncMock()
     mock_response.status_code = 200
     mock_response.headers = {"content-type": "application/json"}
+    mock_response.raise_for_status = MagicMock()
     mock_client.get.return_value = mock_response
     monkeypatch.setattr(parser, "_get_client", AsyncMock(return_value=mock_client))
     result = await parser.parse_url("https://example.com/data.json")

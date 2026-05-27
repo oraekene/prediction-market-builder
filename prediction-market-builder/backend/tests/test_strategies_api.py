@@ -219,11 +219,17 @@ async def test_apply_template_not_found(authenticated_client):
 
 @pytest.mark.asyncio
 async def test_evaluate_strategy_uninitialized(authenticated_client):
-    resp = await authenticated_client.post("/api/strategies/evaluate", json={
-        "nodes": [],
-        "edges": [],
-    })
-    assert resp.status_code == 503
+    from app.routers import strategies as strategies_router
+    original = strategies_router._strategy_engine
+    strategies_router._strategy_engine = None
+    try:
+        resp = await authenticated_client.post("/api/strategies/evaluate", json={
+            "nodes": [],
+            "edges": [],
+        })
+        assert resp.status_code == 503
+    finally:
+        strategies_router._strategy_engine = original
 
 
 @pytest.mark.asyncio
