@@ -64,7 +64,7 @@ class SafeWalletService:
         wallet.balance = round(wallet.balance + amount, 2)
 
         record = WithdrawalRecord(
-            wallet_id=wallet.id,
+            safe_wallet_id=wallet.id,
             user_id=user_id,
             amount=amount,
             currency=currency,
@@ -113,7 +113,7 @@ class SafeWalletService:
             })
 
         for currency, balance in balances_by_currency.items():
-            if currency == "USD":
+            if currency in ("USD", "USDC", "USDT", "DAI"):
                 total_usd += balance
 
         return {
@@ -136,7 +136,7 @@ class SafeWalletService:
         return [
             {
                 "id": record.id,
-                "wallet_id": record.wallet_id,
+                "wallet_id": record.safe_wallet_id,
                 "amount": record.amount,
                 "currency": record.currency,
                 "source": record.source,

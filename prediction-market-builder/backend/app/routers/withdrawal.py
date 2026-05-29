@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.database import get_session
 from app.models.user import User
 from app.models.safe_wallet import SafeWallet
-from app.models.withdrawal_strategy import WithdrawalStrategy
+from app.models.withdrawal_strategy import WithdrawalStrategyModel as WithdrawalStrategy
 from app.routers.auth import get_current_user
 from app.services.safe_wallet_service import SafeWalletService
 

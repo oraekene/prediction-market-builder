@@ -166,11 +166,11 @@ def handle_break_even_stop(node: dict, inputs, ctx) -> dict[str, Any]:
         if side == "buy":
             profit_pct = (current_price - entry_price) / entry_price if entry_price > 0 else 0
             stop_price = entry_price * (1 + buffer_pct)
-            triggered = profit_pct >= trigger_pct and current_price <= stop_price
+            triggered = profit_pct > 0 and current_price <= stop_price
         else:
             profit_pct = (entry_price - current_price) / entry_price if entry_price > 0 else 0
             stop_price = entry_price * (1 - buffer_pct)
-            triggered = profit_pct >= trigger_pct and current_price >= stop_price
+            triggered = profit_pct > 0 and current_price >= stop_price
         if triggered:
             triggered_positions.append({
                 "market_id": pos.get("market_id"), "entry_price": entry_price,
@@ -474,10 +474,11 @@ def handle_worst_case_portfolio(node: dict, inputs, ctx) -> dict[str, Any]:
     if len(returns) < 2:
         return {"triggered": False, "worst_case_loss": 0.0}
     arr = np.array(returns, dtype=np.float64)
-    worst = float(np.min(arr))
-    cumulative_worst = float(np.sum(arr[arr < 0])) if np.any(arr < 0) else 0
-    total_capital = portfolio.get("current_capital", 10000)
-    loss_pct = abs(cumulative_worst) / total_capital if total_capital > 0 else 0
+    negative_returns = arr[arr < 0]
+    if len(negative_returns) == 0:
+        return {"triggered": False, "worst_case_loss": 0.0}
+    cumulative_loss = float(np.sum(negative_returns))
+    loss_pct = abs(cumulative_loss)
     return {"triggered": loss_pct >= max_wcl, "worst_case_loss": round(loss_pct, 4)}
 
 
