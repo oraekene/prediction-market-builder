@@ -14,3 +14,9 @@ prediction-market-builder/backend/data/memory/
 prediction-market-builder/backend/pmbuilder.db
 prediction-market-builder/backend/tests/.pytest_test.db
 prediction-market-builder/backend/data/analytics.duckdb
+prediction-market-builder/backend/data/*.sqlite3
+prediction-market-builder/backend/pm_strategy_builder.egg-info/
+docs/nppBackup/
+prediction-market-builder/backend/*.log
+prediction-market-builder/backend/*.err
+prediction-market-builder/frontend/dist/
