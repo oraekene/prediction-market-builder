@@ -11,6 +11,7 @@ import PaperTradingPage from '@/pages/PaperTradingPage'
 import LoginPage from '@/pages/LoginPage'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import MetaStrategiesPage from '@/pages/MetaStrategiesPage'
+import WithdrawalPage from '@/pages/WithdrawalPage'
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/paper-trading" element={<PaperTradingPage />} />
             <Route path="/meta-strategies" element={<MetaStrategiesPage />} />
             <Route path="/meta-strategies/:id" element={<MetaStrategiesPage />} />
+            <Route path="/withdrawal" element={<WithdrawalPage />} />
           </Route>
         </Routes>
         <ChatInterface />

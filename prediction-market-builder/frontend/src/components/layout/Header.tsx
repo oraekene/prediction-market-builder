@@ -10,6 +10,7 @@ const navItems = [
   { path: '/settings', label: 'Settings' },
   { path: '/paper-trading', label: 'Paper Trading' },
   { path: '/meta-strategies', label: 'Meta-Strategies' },
+  { path: '/withdrawal', label: 'Withdrawal' },
 ]
 
 export default function Header() {

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from sqlalchemy import select
 from app.database import engine, create_tables
-from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies, explainability
+from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies, explainability, withdrawal
 from app.agentic_search import search_router
 from app.routers.auth import get_current_user
 from app.services.research_scheduler import ResearchScheduler
@@ -40,6 +40,7 @@ from app.ai.domain_providers.onchain_provider import OnChainDomainProvider
 from app.ai.domain_providers.macros_provider import MacrosDomainProvider
 from app.ai.domain_providers.social_provider import SocialDomainProvider
 from app.ai.domain_providers.legal_provider import LegalDomainProvider
+from app.services.position_monitor import PositionMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,14 @@ async def lifespan(app: FastAPI):
     search_router.init_search_orchestrator(search_orchestrator)
     await scheduler.start()
     await watchdog.start()
+    from app.services.execution import ExecutionEngine
+    from app.services.paper_trading import PaperTradingService
+    _execution_engine = ExecutionEngine()
+    _paper_trading_service = PaperTradingService()
+    _position_monitor = PositionMonitor(_execution_engine, _paper_trading_service)
+    await _position_monitor.start()
     yield
+    await _position_monitor.stop()
     await watchdog.stop()
     await scheduler.stop()
     await engine.dispose()
@@ -364,6 +372,7 @@ app.include_router(trades.router, dependencies=[Depends(get_current_user)])
 app.include_router(paper_trading.router, dependencies=[Depends(get_current_user)])
 app.include_router(meta_strategies.router, dependencies=[Depends(get_current_user)])
 app.include_router(explainability.router, dependencies=[Depends(get_current_user)])
+app.include_router(withdrawal.router, dependencies=[Depends(get_current_user)])
 app.include_router(search_router.router, dependencies=[Depends(get_current_user)])
 
 

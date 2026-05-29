@@ -31,6 +31,29 @@ export async function createStrategy(data: any): Promise<any> {
   return res.json()
 }
 
+export async function fetchStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}`)
+  if (!res.ok) throw new Error('Strategy not found')
+  return res.json()
+}
+
+export async function updateStrategy(id: string, data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update strategy')
+  return res.json()
+}
+
+export async function deleteStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete strategy')
+  return res.json()
+}
+
 export async function fetchPortfolio(): Promise<any> {
   const res = await apiFetch(`${BASE_URL}/portfolio`)
   if (!res.ok) throw new Error('Failed to fetch portfolio')

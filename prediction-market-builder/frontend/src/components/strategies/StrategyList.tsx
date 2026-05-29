@@ -26,7 +26,11 @@ const TEMPLATES = [
   },
 ]
 
-export default function StrategyList() {
+interface StrategyListProps {
+  onEditStrategy?: (strategyId: string) => void
+}
+
+export default function StrategyList({ onEditStrategy }: StrategyListProps) {
   const [showTemplates, setShowTemplates] = useState(false)
   const { data: strategies, isLoading, error } = useStrategies()
   const createStrategy = useCreateStrategy()
@@ -113,7 +117,8 @@ export default function StrategyList() {
           {strategies.map((strategy: StrategyItem) => (
             <div
               key={strategy.id}
-              className="rounded-lg border border-gray-800 bg-gray-950 p-4 hover:border-gray-700"
+              onClick={() => onEditStrategy?.(strategy.id)}
+              className="rounded-lg border border-gray-800 bg-gray-950 p-4 hover:border-blue-600/50 transition-colors cursor-pointer"
             >
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-white truncate">{strategy.name}</h3>

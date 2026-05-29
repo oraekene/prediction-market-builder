@@ -13,7 +13,21 @@ class ExecutionContext:
                  performance_snapshot: dict | None = None,
                  explainability_service=None, hermes=None, rlm=None,
                  market_regime=None, market_aggregator=None,
-                 chromadb_manager=None):
+                 chromadb_manager=None,
+                 trail_states: dict | None = None,
+                 circuit_breaker_state: dict | None = None,
+                 withdrawal_state: dict | None = None,
+                 daily_pnl: float = 0.0,
+                 weekly_pnl: float = 0.0,
+                 monthly_pnl: float = 0.0,
+                 consecutive_losses: int = 0,
+                 price_history: list | None = None,
+                 factor_exposures: dict | None = None,
+                 greeks: dict | None = None,
+                 vpin: float = 0.0,
+                 ofi: float = 0.0,
+                 position_monitor=None,
+                 execution_engine=None):
         self.market = market or {}
         self.signal = signal or {}
         self.portfolio = portfolio or {}
@@ -27,6 +41,20 @@ class ExecutionContext:
         self.market_regime = market_regime
         self.market_aggregator = market_aggregator
         self.chromadb_manager = chromadb_manager
+        self.trail_states = trail_states or {}
+        self.circuit_breaker_state = circuit_breaker_state or {}
+        self.withdrawal_state = withdrawal_state or {}
+        self.daily_pnl = daily_pnl
+        self.weekly_pnl = weekly_pnl
+        self.monthly_pnl = monthly_pnl
+        self.consecutive_losses = consecutive_losses
+        self.price_history = price_history or []
+        self.factor_exposures = factor_exposures or {}
+        self.greeks = greeks or {}
+        self.vpin = vpin
+        self.ofi = ofi
+        self.position_monitor = position_monitor
+        self.execution_engine = execution_engine
 
 
 class NodeRegistry:

@@ -2,6 +2,7 @@ import type { NodeCanvasNode } from './NodeCanvas'
 
 interface Props {
   selectedNode: NodeCanvasNode | null
+  onNodeUpdate?: (nodeId: string, newData: Record<string, unknown>) => void
 }
 
 const performanceMetrics: Record<string, { label: string; description: string }> = {
@@ -25,7 +26,7 @@ const performanceMetrics: Record<string, { label: string; description: string }>
   'consecutive-streak': { label: 'Consecutive Streak', description: 'Current win/loss streak' },
 }
 
-export default function NodePropertyPanel({ selectedNode }: Props) {
+export default function NodePropertyPanel({ selectedNode, onNodeUpdate }: Props) {
   if (!selectedNode) {
     return (
       <aside className="w-64 border-l border-gray-800 bg-gray-950 p-4">
@@ -38,12 +39,37 @@ export default function NodePropertyPanel({ selectedNode }: Props) {
   const metric = selectedNode.data.metric as string | undefined
   const meta = metric ? performanceMetrics[metric] : null
 
+  const handleFieldChange = (key: string, value: unknown) => {
+    if (onNodeUpdate) {
+      onNodeUpdate(selectedNode.id, { [key]: value })
+    }
+  }
+
   return (
     <aside className="w-64 border-l border-gray-800 bg-gray-950 p-4 overflow-y-auto">
       <h3 className="mb-4 text-sm font-semibold text-white">
         Configure: {selectedNode.data.label}
       </h3>
       <div className="space-y-4">
+        {/* Node label */}
+        <label className="block">
+          <span className="text-xs text-gray-400">Label</span>
+          <input
+            type="text"
+            value={(selectedNode.data.label as string) || ''}
+            onChange={(e) => handleFieldChange('label', e.target.value)}
+            className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+          />
+        </label>
+
+        {/* Backend type display */}
+        {selectedNode.data.backendType && (
+          <div className="rounded bg-gray-800/50 p-2">
+            <span className="text-[10px] text-gray-500">Handler: </span>
+            <span className="text-[10px] font-mono text-blue-400">{selectedNode.data.backendType as string}</span>
+          </div>
+        )}
+
         {isPerformance && meta && (
           <>
             <div className="rounded bg-blue-900/20 border border-blue-800/30 p-2">
@@ -56,9 +82,9 @@ export default function NodePropertyPanel({ selectedNode }: Props) {
                 type="number"
                 min={0}
                 max={5000}
-                defaultValue={50}
+                value={(selectedNode.data.window as number) ?? 50}
+                onChange={(e) => handleFieldChange('window', parseInt(e.target.value) || 0)}
                 className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-                placeholder="50 = last 50 trades, 0 = all"
               />
               <p className="text-[10px] text-gray-600 mt-0.5">0 = all trades, 50+ for rolling metrics</p>
             </label>
@@ -69,11 +95,15 @@ export default function NodePropertyPanel({ selectedNode }: Props) {
             </div>
           </>
         )}
+
         {!isPerformance && (
           <>
             <label className="block">
               <span className="text-xs text-gray-400">Parameter</span>
               <input
+                type="text"
+                value={(selectedNode.data.parameter as string) || ''}
+                onChange={(e) => handleFieldChange('parameter', e.target.value)}
                 className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
                 placeholder="Value"
               />
@@ -81,6 +111,8 @@ export default function NodePropertyPanel({ selectedNode }: Props) {
             <label className="block">
               <span className="text-xs text-gray-400">Description</span>
               <textarea
+                value={(selectedNode.data.description as string) || ''}
+                onChange={(e) => handleFieldChange('description', e.target.value)}
                 className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
                 rows={3}
                 placeholder="Optional description"

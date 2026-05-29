@@ -23,8 +23,42 @@ const nodeCategories: { category: string; items: string[] }[] = [
   { category: 'Sources', items: ['Polymarket', 'Kalshi', 'Drift', 'Web Search', 'News'] },
   { category: 'Filters', items: ['TabPFN Signal', 'Toto-2 Climate', 'Sentiment', 'SHAP Feature Importance'] },
   { category: 'Conditions', items: ['Threshold', 'Time-Based', 'AND/OR', 'Branch'] },
-  { category: 'Actions', items: ['Place Bet', 'Send Alert', 'Forward', 'Webhook'] },
-  { category: 'Risk', items: ['Kelly Criterion', 'Stop-Loss', 'Drawdown'] },
+  { category: 'Actions', items: ['Place Bet', 'Send Alert', 'Forward', 'Webhook', 'Close Position', 'Convert to Stablecoin'] },
+  { category: 'Risk - Position Exits', items: [
+    'Stop-Loss', 'Take Profit', 'Trailing Stop', 'Tightening Trailing Stop',
+    'ATR Stop', 'Volatility Stop', 'Break-Even Stop', 'Time Exit',
+    'Scaling Exit', 'Moving Average Exit',
+  ]},
+  { category: 'Risk - Portfolio Limits', items: [
+    'Drawdown', 'VaR Check', 'Expected Shortfall', 'Daily Loss Limit',
+    'Weekly Loss Limit', 'Monthly Loss Limit', 'Max Position Count',
+    'Max Gross Exposure', 'Max Net Exposure', 'Leverage Limit',
+    'Sector Exposure Limit', 'Beta Exposure Limit', 'Volatility Targeting',
+    'Stress Test', 'Monte Carlo Risk', 'Tail Risk Check', 'Liquidity Risk',
+  ]},
+  { category: 'Risk - Diversification', items: [
+    'Correlation Check', 'Concentration Check', 'Factor Exposure',
+    'MCR Check', 'Worst Case Portfolio',
+  ]},
+  { category: 'Risk - Greeks', items: [
+    'Delta Exposure', 'Gamma Exposure', 'Vega Exposure',
+    'Theta Decay', 'Vanna Exposure', 'Volga Exposure',
+  ]},
+  { category: 'Risk - Execution', items: [
+    'Circuit Breaker', 'Slippage Guard', 'Max Consecutive Losses',
+    'Cooldown Period', 'Position Timeout',
+  ]},
+  { category: 'Risk - Regime', items: [
+    'Volatility Regime', 'Correlation Regime Shift', 'Toxicity Detection',
+    'Order Flow Imbalance',
+  ]},
+  { category: 'Risk - Portfolio Construction', items: [
+    'Kelly Criterion', 'Risk Parity', 'Mean-Variance Optimization',
+    'Black-Litterman', 'Hierarchical Risk Parity',
+  ]},
+  { category: 'Auto-Withdrawal', items: [
+    'Withdraw to Safe Wallet', 'Withdrawal Strategy',
+  ]},
   { category: 'Analysis', items: ['Bayesian Inference', 'Monte Carlo', 'Backtest', 'SHAP Explainability'] },
 ]
 
@@ -36,7 +70,7 @@ export default function NodePalette() {
   }
 
   return (
-    <aside className="w-48 border-r border-gray-800 bg-gray-950 p-3 overflow-y-auto">
+    <aside className="w-56 border-r border-gray-800 bg-gray-950 p-3 overflow-y-auto">
       <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Nodes</h3>
       {nodeCategories.map((group) => (
         <div key={group.category} className="mb-3">
