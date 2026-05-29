@@ -226,17 +226,18 @@ class PositionMonitor:
             if node_type == "trailing_stop":
                 state = position.trail_states.get(node_id, {})
                 high_water = state.get("high_water_mark", position.entry_price)
+                was_activated = state.get("activated", False)
 
                 if position.side == "buy":
                     gain_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
-                    activated = gain_pct >= activation_pct
+                    activated = was_activated or gain_pct >= activation_pct
                     if current_price > high_water:
                         high_water = current_price
                     stop_price = high_water * (1 - trail_pct)
                     triggered = activated and current_price <= stop_price
                 else:
                     gain_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
-                    activated = gain_pct >= activation_pct
+                    activated = was_activated or gain_pct >= activation_pct
                     if current_price < high_water or high_water == position.entry_price:
                         high_water = current_price
                     stop_price = high_water * (1 + trail_pct)

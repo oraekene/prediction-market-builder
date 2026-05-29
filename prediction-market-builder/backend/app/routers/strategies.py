@@ -333,6 +333,20 @@ class EvaluateStrategyRequest(BaseModel):
     edges: list = []
     market_id: str | None = None
     market: dict | None = None
+    portfolio: dict | None = None
+    signal: dict | None = None
+    daily_pnl: float = 0.0
+    weekly_pnl: float = 0.0
+    monthly_pnl: float = 0.0
+    consecutive_losses: int = 0
+    trail_states: dict | None = None
+    circuit_breaker_state: dict | None = None
+    withdrawal_state: dict | None = None
+    price_history: list | None = None
+    factor_exposures: dict | None = None
+    greeks: dict | None = None
+    vpin: float = 0.0
+    ofi: float = 0.0
 
 
 @router.post("/evaluate")
@@ -352,6 +366,8 @@ async def evaluate_strategy(data: EvaluateStrategyRequest):
 
     ctx = ExecutionContext(
         market=market,
+        portfolio=data.portfolio,
+        signal=data.signal,
         tabpfn=_tabpfn,
         market_regime=_market_regime,
         explainability_service=_explainability_service,
@@ -359,5 +375,17 @@ async def evaluate_strategy(data: EvaluateStrategyRequest):
         rlm=_rlm,
         market_aggregator=_market_aggregator,
         chromadb_manager=ChromaDBManager(),
+        trail_states=data.trail_states,
+        circuit_breaker_state=data.circuit_breaker_state,
+        withdrawal_state=data.withdrawal_state,
+        daily_pnl=data.daily_pnl,
+        weekly_pnl=data.weekly_pnl,
+        monthly_pnl=data.monthly_pnl,
+        consecutive_losses=data.consecutive_losses,
+        price_history=data.price_history,
+        factor_exposures=data.factor_exposures,
+        greeks=data.greeks,
+        vpin=data.vpin,
+        ofi=data.ofi,
     )
     return await _strategy_engine.evaluate(data.nodes, data.edges, ctx)

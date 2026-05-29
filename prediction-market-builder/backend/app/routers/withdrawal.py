@@ -17,13 +17,13 @@ safe_wallet_service = SafeWalletService()
 
 class CreateWalletRequest(BaseModel):
     name: str
-    currency: str = "USD"
+    currency: str = "USDC"
 
 
 class TransferRequest(BaseModel):
     amount: float
-    currency: str = "USD"
-    source: str = "paper_trading"
+    currency: str = "USDC"
+    source: str = "profits"
     trigger_type: str = "manual"
     strategy_id: str | None = None
 
@@ -31,27 +31,16 @@ class TransferRequest(BaseModel):
 class CreateStrategyRequest(BaseModel):
     name: str
     description: str | None = None
-    trigger_type: str = "manual"
-    percentage: float = 0.1
-    min_amount: float = 10.0
-    max_amount: float = 1000.0
-    currency: str = "USD"
-    target_wallet_id: str | None = None
-    conditions: dict = {}
-    enabled: bool = True
+    steps: list = []
+    safe_wallet_id: str | None = None
 
 
 class UpdateStrategyRequest(BaseModel):
     name: str | None = None
     description: str | None = None
-    trigger_type: str | None = None
-    percentage: float | None = None
-    min_amount: float | None = None
-    max_amount: float | None = None
-    currency: str | None = None
-    target_wallet_id: str | None = None
-    conditions: dict | None = None
-    enabled: bool | None = None
+    steps: list | None = None
+    is_active: bool | None = None
+    safe_wallet_id: str | None = None
 
 
 @router.post("/wallets")
@@ -71,6 +60,7 @@ async def create_safe_wallet(
         "name": wallet.name,
         "currency": wallet.currency,
         "balance": wallet.balance,
+        "is_disconnected": wallet.is_disconnected,
         "created_at": wallet.created_at.isoformat() if wallet.created_at else None,
     }
 
@@ -90,6 +80,7 @@ async def list_safe_wallets(
             "name": w.name,
             "currency": w.currency,
             "balance": w.balance,
+            "is_disconnected": w.is_disconnected,
             "created_at": w.created_at.isoformat() if w.created_at else None,
         }
         for w in wallets
@@ -116,6 +107,7 @@ async def get_safe_wallet(
         "name": wallet.name,
         "currency": wallet.currency,
         "balance": wallet.balance,
+        "is_disconnected": wallet.is_disconnected,
         "created_at": wallet.created_at.isoformat() if wallet.created_at else None,
     }
 
@@ -145,7 +137,7 @@ async def manual_transfer(
         strategy_id=data.strategy_id,
         session=session,
     )
-    if not result["success"]:
+    if not result.get("success", True):
         raise HTTPException(status_code=400, detail=result.get("error", "Transfer failed"))
     return result
 
@@ -170,14 +162,8 @@ async def create_withdrawal_strategy(
         user_id=current_user.id,
         name=data.name,
         description=data.description,
-        trigger_type=data.trigger_type,
-        percentage=data.percentage,
-        min_amount=data.min_amount,
-        max_amount=data.max_amount,
-        currency=data.currency,
-        target_wallet_id=data.target_wallet_id,
-        conditions=data.conditions,
-        enabled=data.enabled,
+        steps=data.steps,
+        safe_wallet_id=data.safe_wallet_id,
     )
     session.add(strategy)
     await session.commit()
@@ -186,14 +172,9 @@ async def create_withdrawal_strategy(
         "id": strategy.id,
         "name": strategy.name,
         "description": strategy.description,
-        "trigger_type": strategy.trigger_type,
-        "percentage": strategy.percentage,
-        "min_amount": strategy.min_amount,
-        "max_amount": strategy.max_amount,
-        "currency": strategy.currency,
-        "target_wallet_id": strategy.target_wallet_id,
-        "conditions": strategy.conditions,
-        "enabled": strategy.enabled,
+        "is_active": strategy.is_active,
+        "steps": strategy.steps,
+        "safe_wallet_id": strategy.safe_wallet_id,
         "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
     }
 
@@ -214,14 +195,9 @@ async def list_withdrawal_strategies(
             "id": s.id,
             "name": s.name,
             "description": s.description,
-            "trigger_type": s.trigger_type,
-            "percentage": s.percentage,
-            "min_amount": s.min_amount,
-            "max_amount": s.max_amount,
-            "currency": s.currency,
-            "target_wallet_id": s.target_wallet_id,
-            "conditions": s.conditions,
-            "enabled": s.enabled,
+            "is_active": s.is_active,
+            "steps": s.steps,
+            "safe_wallet_id": s.safe_wallet_id,
             "created_at": s.created_at.isoformat() if s.created_at else None,
         }
         for s in strategies
@@ -247,14 +223,10 @@ async def get_withdrawal_strategy(
         "id": strategy.id,
         "name": strategy.name,
         "description": strategy.description,
-        "trigger_type": strategy.trigger_type,
-        "percentage": strategy.percentage,
-        "min_amount": strategy.min_amount,
-        "max_amount": strategy.max_amount,
-        "currency": strategy.currency,
-        "target_wallet_id": strategy.target_wallet_id,
-        "conditions": strategy.conditions,
-        "enabled": strategy.enabled,
+        "is_active": strategy.is_active,
+        "steps": strategy.steps,
+        "step_states": strategy.step_states,
+        "safe_wallet_id": strategy.safe_wallet_id,
         "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
     }
 
@@ -279,36 +251,21 @@ async def update_withdrawal_strategy(
         strategy.name = data.name
     if data.description is not None:
         strategy.description = data.description
-    if data.trigger_type is not None:
-        strategy.trigger_type = data.trigger_type
-    if data.percentage is not None:
-        strategy.percentage = data.percentage
-    if data.min_amount is not None:
-        strategy.min_amount = data.min_amount
-    if data.max_amount is not None:
-        strategy.max_amount = data.max_amount
-    if data.currency is not None:
-        strategy.currency = data.currency
-    if data.target_wallet_id is not None:
-        strategy.target_wallet_id = data.target_wallet_id
-    if data.conditions is not None:
-        strategy.conditions = data.conditions
-    if data.enabled is not None:
-        strategy.enabled = data.enabled
+    if data.steps is not None:
+        strategy.steps = data.steps
+    if data.is_active is not None:
+        strategy.is_active = data.is_active
+    if data.safe_wallet_id is not None:
+        strategy.safe_wallet_id = data.safe_wallet_id
     await session.commit()
     await session.refresh(strategy)
     return {
         "id": strategy.id,
         "name": strategy.name,
         "description": strategy.description,
-        "trigger_type": strategy.trigger_type,
-        "percentage": strategy.percentage,
-        "min_amount": strategy.min_amount,
-        "max_amount": strategy.max_amount,
-        "currency": strategy.currency,
-        "target_wallet_id": strategy.target_wallet_id,
-        "conditions": strategy.conditions,
-        "enabled": strategy.enabled,
+        "is_active": strategy.is_active,
+        "steps": strategy.steps,
+        "safe_wallet_id": strategy.safe_wallet_id,
         "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
     }
 
@@ -334,7 +291,7 @@ async def delete_withdrawal_strategy(
 
 
 @router.post("/strategies/{strategy_id}/evaluate")
-async def evaluate_strategy(
+async def evaluate_withdrawal_strategy(
     strategy_id: str,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -349,34 +306,33 @@ async def evaluate_strategy(
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
-    wallet_result = await session.execute(
-        select(SafeWallet).where(
-            SafeWallet.user_id == current_user.id,
-            SafeWallet.currency == strategy.currency,
-        )
-    )
-    wallet = wallet_result.scalar_one_or_none()
+    steps = strategy.steps or []
+    step_states = strategy.step_states or {}
+    triggered_steps = []
 
-    current_balance = wallet.balance if wallet else 0.0
-    potential_withdrawal = round(current_balance * strategy.percentage, 2)
-    within_limits = strategy.min_amount <= potential_withdrawal <= strategy.max_amount
+    for i, step in enumerate(steps):
+        step_id = step.get("id", str(i))
+        state = step_states.get(step_id, {"status": "pending"})
+        if step.get("once", True) and state.get("status") == "executed":
+            continue
+        condition = step.get("condition", {})
+        triggered_steps.append({
+            "step_id": step_id,
+            "condition_type": condition.get("type", "unknown"),
+            "status": state.get("status", "pending"),
+        })
 
     return {
         "strategy_id": strategy.id,
         "name": strategy.name,
-        "trigger_type": strategy.trigger_type,
-        "percentage": strategy.percentage,
-        "current_balance": current_balance,
-        "potential_withdrawal": potential_withdrawal,
-        "min_amount": strategy.min_amount,
-        "max_amount": strategy.max_amount,
-        "within_limits": within_limits,
-        "enabled": strategy.enabled,
+        "is_active": strategy.is_active,
+        "total_steps": len(steps),
+        "triggered_steps": triggered_steps,
     }
 
 
 @router.post("/strategies/{strategy_id}/toggle")
-async def toggle_strategy(
+async def toggle_withdrawal_strategy(
     strategy_id: str,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -390,11 +346,11 @@ async def toggle_strategy(
     strategy = result.scalar_one_or_none()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    strategy.enabled = not strategy.enabled
+    strategy.is_active = not strategy.is_active
     await session.commit()
     await session.refresh(strategy)
     return {
         "id": strategy.id,
         "name": strategy.name,
-        "enabled": strategy.enabled,
+        "is_active": strategy.is_active,
     }

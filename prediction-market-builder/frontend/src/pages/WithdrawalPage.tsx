@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
   useSafeWallets,
+  useCreateSafeWallet,
+  useTransferToSafe,
   useWithdrawalStrategies,
   useCreateWithdrawalStrategy,
   useUpdateWithdrawalStrategy,
@@ -8,7 +10,7 @@ import {
   useEvaluateWithdrawalStrategy,
 } from '@/hooks/useWithdrawal'
 import WithdrawalStepEditor from '@/components/withdrawal/WithdrawalStepEditor'
-import { WithdrawalStep, WithdrawalStrategy } from '@/types/withdrawal'
+import { WithdrawalStep } from '@/types/withdrawal'
 
 let stepIdCounter = 0
 function generateStepId() {
@@ -33,6 +35,8 @@ export default function WithdrawalPage() {
   const updateStrategy = useUpdateWithdrawalStrategy()
   const deleteStrategy = useDeleteWithdrawalStrategy()
   const evaluateStrategy = useEvaluateWithdrawalStrategy()
+  const createWallet = useCreateSafeWallet()
+  const transferToSafe = useTransferToSafe()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [strategyName, setStrategyName] = useState('')
@@ -41,6 +45,12 @@ export default function WithdrawalPage() {
   const [safeWalletId, setSafeWalletId] = useState<string>('')
   const [steps, setSteps] = useState<WithdrawalStep[]>([makeEmptyStep()])
   const [testResult, setTestResult] = useState<{ triggered: boolean; steps_evaluated: number } | null>(null)
+  const [showWalletSection, setShowWalletSection] = useState(false)
+  const [newWalletName, setNewWalletName] = useState('')
+  const [newWalletCurrency, setNewWalletCurrency] = useState('USDC')
+  const [transferAmount, setTransferAmount] = useState('')
+  const [transferSource, setTransferSource] = useState('profits')
+  const [transferCurrency, setTransferCurrency] = useState('USDC')
 
   const selectedStrategy = strategies.find((s) => s.id === selectedId)
 
@@ -276,6 +286,119 @@ export default function WithdrawalPage() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Safe Wallets Section */}
+        <div className="mt-8">
+          <button
+            onClick={() => setShowWalletSection(!showWalletSection)}
+            className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors mb-4"
+          >
+            <span>{showWalletSection ? '▼' : '▶'}</span>
+            <span className="font-medium">Safe Wallets</span>
+            <span className="text-xs text-gray-600">({wallets.length} wallets, ${wallets.reduce((s, w) => s + w.balance, 0).toFixed(2)} protected)</span>
+          </button>
+
+          {showWalletSection && (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-gray-300">Create Safe Wallet</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  value={newWalletName}
+                  onChange={(e) => setNewWalletName(e.target.value)}
+                  placeholder="Wallet name"
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                />
+                <select
+                  value={newWalletCurrency}
+                  onChange={(e) => setNewWalletCurrency(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="USDC">USDC</option>
+                  <option value="USDT">USDT</option>
+                  <option value="USD">USD</option>
+                </select>
+                <button
+                  onClick={async () => {
+                    if (!newWalletName.trim()) return
+                    await createWallet.mutateAsync({ name: newWalletName, currency: newWalletCurrency })
+                    setNewWalletName('')
+                  }}
+                  disabled={!newWalletName.trim() || createWallet.isPending}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  {createWallet.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+
+              {wallets.length > 0 && (
+                <>
+                  <div className="border-t border-gray-800 pt-4">
+                    <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-3">Your Wallets</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {wallets.map((w) => (
+                        <div key={w.id} className="bg-gray-800 border border-gray-700 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium text-white">{w.name}</span>
+                            <span className="text-xs text-gray-500">{w.currency}</span>
+                          </div>
+                          <p className="text-lg font-bold text-emerald-400">${w.balance.toFixed(2)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-800 pt-4">
+                    <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-3">Transfer to Safe Wallet</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                      <select
+                        value={transferCurrency}
+                        onChange={(e) => setTransferCurrency(e.target.value)}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="USDC">USDC</option>
+                        <option value="USDT">USDT</option>
+                        <option value="USD">USD</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={transferAmount}
+                        onChange={(e) => setTransferAmount(e.target.value)}
+                        placeholder="Amount"
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      />
+                      <select
+                        value={transferSource}
+                        onChange={(e) => setTransferSource(e.target.value)}
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="profits">Profits</option>
+                        <option value="capital">Capital</option>
+                      </select>
+                      <button
+                        onClick={async () => {
+                          if (!transferAmount || parseFloat(transferAmount) <= 0) return
+                          await transferToSafe.mutateAsync({
+                            amount: parseFloat(transferAmount),
+                            currency: transferCurrency,
+                            source: transferSource,
+                          })
+                          setTransferAmount('')
+                        }}
+                        disabled={!transferAmount || parseFloat(transferAmount) <= 0 || transferToSafe.isPending}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                      >
+                        {transferToSafe.isPending ? 'Transferring...' : 'Transfer'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
