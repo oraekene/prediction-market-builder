@@ -1,0 +1,87 @@
+{
+  "id": "nasdaq_mean_reversion_v1",
+  "name": "NASDAQ-100 Mean Reversion",
+  "description": "Z-score mean reversion strategy for NASDAQ-100 / QQQ prediction markets. Enters long on oversold (z < -2.0) with volume confirmation, short on overbought (z > 2.0). Uses ATR-based position sizing and stop-losses.",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "signal_1",
+      "type": "nasdaq_signal_generator",
+      "label": "Signal Generator",
+      "data": {
+        "lookback": 30,
+        "z_threshold": 2.0,
+        "price_field": "nasdaq_price"
+      }
+    },
+    {
+      "id": "confirm_1",
+      "type": "nasdaq_confirmation",
+      "label": "Confirmation",
+      "data": {
+        "volume_multiplier": 1.5,
+        "volume_period": 20,
+        "check_vix": true,
+        "max_vix_regime": "high"
+      }
+    },
+    {
+      "id": "risk_1",
+      "type": "nasdaq_risk_management",
+      "label": "Risk Management",
+      "data": {
+        "max_portfolio_pct": 0.05,
+        "atr_period": 14,
+        "atr_multiplier": 2.0,
+        "risk_per_trade": 0.01
+      }
+    },
+    {
+      "id": "entry_exit_1",
+      "type": "nasdaq_entry_exit",
+      "label": "Entry/Exit Logic",
+      "data": {
+        "exit_z_threshold": 0.5,
+        "max_hold_bars": 390,
+        "order_type": "limit",
+        "limit_offset": 0.005
+      }
+    },
+    {
+      "id": "exec_1",
+      "type": "nasdaq_execution",
+      "label": "Execution",
+      "data": {
+        "fill_timeout_sec": 300,
+        "platform": "kalshi",
+        "market_prefix": "NASDAQ-"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "signal_1",
+      "target": "confirm_1"
+    },
+    {
+      "source": "confirm_1",
+      "target": "risk_1"
+    },
+    {
+      "source": "risk_1",
+      "target": "entry_exit_1"
+    },
+    {
+      "source": "entry_exit_1",
+      "target": "exec_1"
+    }
+  ],
+  "backtest_config": {
+    "initial_capital": 10000,
+    "lookback_days": 60,
+    "bar_interval": "1min",
+    "target_win_rate": 0.55,
+    "target_profit_factor": 1.5,
+    "max_daily_drawdown": 0.03
+  }
+}
