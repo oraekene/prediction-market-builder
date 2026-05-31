@@ -23,6 +23,9 @@ class CompositePreset(str, enum.Enum):
     SHARPE_MAX = "sharpe_max"
     WIN_RATE_MAX = "win_rate_max"
     RISK_ADJUSTED = "risk_adjusted"
+    WIN_RATE = "win_rate"
+    CALMAR = "calmar"
+    PROFIT_FACTOR = "profit_factor"
 
 
 class ResearchSession(Base):
