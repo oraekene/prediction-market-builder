@@ -8,6 +8,7 @@ from app.services.shap_node_handlers import register_shap_handlers
 from app.services.palette_node_handlers import register_palette_handlers
 from app.services.advanced_risk_node_handlers import register_advanced_risk_handlers
 from app.services.action_node_handlers import register_action_handlers
+from app.services.nasdaq_node_handlers import register_nasdaq_handlers
 
 
 _default_registry: NodeRegistry | None = None
@@ -23,6 +24,7 @@ def _get_registry() -> NodeRegistry:
         register_palette_handlers(_default_registry)
         register_advanced_risk_handlers(_default_registry)
         register_action_handlers(_default_registry)
+        register_nasdaq_handlers(_default_registry)
         for node_type, handler in PERFORMANCE_HANDLERS.items():
             _default_registry.register(node_type, handler)
     return _default_registry
