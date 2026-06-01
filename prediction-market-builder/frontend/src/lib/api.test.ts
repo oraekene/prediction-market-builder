@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   fetchMarkets, fetchMarket, fetchStrategies, createStrategy, fetchStrategy,
-  updateStrategy, deleteStrategy, fetchPortfolio, fetchAnalyticsSummary,
+  updateStrategy, deleteStrategy, deployStrategy, pauseStrategy, resumeStrategy,
+  archiveStrategy, rollbackStrategy, fetchStrategyHistory, evaluateStrategyData,
+  fetchStrategyTemplates, createStrategyTemplate, fetchStrategyTemplate,
+  updateStrategyTemplate, deleteStrategyTemplate, applyStrategyTemplate,
+  fetchPortfolio, fetchAnalyticsSummary,
   fetchAnalyticsBacktests, triggerResearchRun, triggerContinuousResearch,
   stopResearch, fetchResearchSessions, fetchResearchSession, fetchResearchResults,
   fetchResearchStats, fetchResearchConfig, updateResearchConfig, fetchClimate,
@@ -96,6 +100,132 @@ describe('deleteStrategy', () => {
     expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1', {
       method: 'DELETE',
     })
+  })
+})
+
+describe('deployStrategy', () => {
+  it('calls POST /api/strategies/:id/deploy', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ status: 'active' }))
+    const result = await deployStrategy('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/deploy', { method: 'POST' })
+    expect(result).toEqual({ status: 'active' })
+  })
+
+  it('throws on error', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse(null, false))
+    await expect(deployStrategy('s1')).rejects.toThrow('Failed to deploy strategy')
+  })
+})
+
+describe('pauseStrategy', () => {
+  it('calls POST /api/strategies/:id/pause', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ status: 'paused' }))
+    await pauseStrategy('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/pause', { method: 'POST' })
+  })
+})
+
+describe('resumeStrategy', () => {
+  it('calls POST /api/strategies/:id/resume', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ status: 'active' }))
+    await resumeStrategy('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/resume', { method: 'POST' })
+  })
+})
+
+describe('archiveStrategy', () => {
+  it('calls POST /api/strategies/:id/archive', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ status: 'archived' }))
+    await archiveStrategy('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/archive', { method: 'POST' })
+  })
+})
+
+describe('rollbackStrategy', () => {
+  it('calls POST /api/strategies/:id/rollback', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ version: 2 }))
+    await rollbackStrategy('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/rollback', { method: 'POST' })
+  })
+})
+
+describe('fetchStrategyHistory', () => {
+  it('calls GET /api/strategies/:id/history', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ current_version: 2, history: [] }))
+    const result = await fetchStrategyHistory('s1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/s1/history')
+    expect(result).toEqual({ current_version: 2, history: [] })
+  })
+})
+
+describe('evaluateStrategyData', () => {
+  it('calls POST /api/strategies/evaluate', async () => {
+    const data = { nodes: [], edges: [] }
+    mockApiFetch.mockResolvedValue(mockResponse({ result: 'ok' }))
+    await evaluateStrategyData(data)
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/evaluate', {
+      method: 'POST', body: JSON.stringify(data),
+    })
+  })
+})
+
+describe('fetchStrategyTemplates', () => {
+  it('calls GET /api/strategies/templates', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse([]))
+    await fetchStrategyTemplates()
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates')
+  })
+})
+
+describe('createStrategyTemplate', () => {
+  it('calls POST /api/strategies/templates', async () => {
+    const data = { name: 'test', config: {} }
+    mockApiFetch.mockResolvedValue(mockResponse({ id: 't1' }))
+    const result = await createStrategyTemplate(data)
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates', {
+      method: 'POST', body: JSON.stringify(data),
+    })
+    expect(result).toEqual({ id: 't1' })
+  })
+})
+
+describe('fetchStrategyTemplate', () => {
+  it('calls GET /api/strategies/templates/:id', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ id: 't1' }))
+    const result = await fetchStrategyTemplate('t1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates/t1')
+    expect(result).toEqual({ id: 't1' })
+  })
+})
+
+describe('updateStrategyTemplate', () => {
+  it('calls PUT /api/strategies/templates/:id', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({}))
+    await updateStrategyTemplate('t1', { name: 'new' })
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates/t1', {
+      method: 'PUT', body: JSON.stringify({ name: 'new' }),
+    })
+  })
+})
+
+describe('deleteStrategyTemplate', () => {
+  it('calls DELETE /api/strategies/templates/:id', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({}))
+    await deleteStrategyTemplate('t1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates/t1', {
+      method: 'DELETE',
+    })
+  })
+})
+
+describe('applyStrategyTemplate', () => {
+  it('calls POST /api/strategies/templates/:id/apply', async () => {
+    mockApiFetch.mockResolvedValue(mockResponse({ id: 's1' }))
+    const result = await applyStrategyTemplate('t1')
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/strategies/templates/t1/apply', {
+      method: 'POST',
+    })
+    expect(result).toEqual({ id: 's1' })
   })
 })
 

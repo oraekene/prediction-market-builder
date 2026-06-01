@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { formatTime } from '@/lib/utils'
 import {
   useSafeWallets,
   useCreateSafeWallet,
@@ -8,6 +9,9 @@ import {
   useUpdateWithdrawalStrategy,
   useDeleteWithdrawalStrategy,
   useEvaluateWithdrawalStrategy,
+  useSafeWalletBalance,
+  useWithdrawalHistory,
+  useToggleWithdrawalStrategy,
 } from '@/hooks/useWithdrawal'
 import WithdrawalStepEditor from '@/components/withdrawal/WithdrawalStepEditor'
 import { WithdrawalStep } from '@/types/withdrawal'
@@ -31,10 +35,13 @@ function makeEmptyStep(): WithdrawalStep {
 export default function WithdrawalPage() {
   const { data: strategies = [], isLoading: strategiesLoading } = useWithdrawalStrategies()
   const { data: wallets = [] } = useSafeWallets()
+  const { data: balanceData } = useSafeWalletBalance()
+  const { data: withdrawalHistory = [] } = useWithdrawalHistory()
   const createStrategy = useCreateWithdrawalStrategy()
   const updateStrategy = useUpdateWithdrawalStrategy()
   const deleteStrategy = useDeleteWithdrawalStrategy()
   const evaluateStrategy = useEvaluateWithdrawalStrategy()
+  const toggleStrategy = useToggleWithdrawalStrategy()
   const createWallet = useCreateSafeWallet()
   const transferToSafe = useTransferToSafe()
 
@@ -158,11 +165,17 @@ export default function WithdrawalPage() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="truncate">{s.name}</span>
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ml-2 ${
-                        s.is_active ? 'bg-emerald-400' : 'bg-gray-600'
-                      }`}
-                    />
+                    <div className="flex items-center gap-1.5 ml-2">
+                      <span
+                        onClick={(e) => { e.stopPropagation(); toggleStrategy.mutate(s.id) }}
+                        className={`block w-2 h-2 rounded-full cursor-pointer ${
+                          toggleStrategy.isPending ? 'opacity-50' : ''
+                        } ${
+                          s.is_active ? 'bg-emerald-400 hover:bg-emerald-300' : 'bg-gray-600 hover:bg-gray-500'
+                        }`}
+                        title={s.is_active ? 'Click to deactivate' : 'Click to activate'}
+                      />
+                    </div>
                   </div>
                 </button>
               ))
@@ -301,6 +314,13 @@ export default function WithdrawalPage() {
 
           {showWalletSection && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+              {balanceData && (
+                <div className="rounded-lg bg-gray-800 border border-gray-700 p-3">
+                  <p className="text-xs text-gray-500">Total Protected Balance</p>
+                  <p className="text-2xl font-bold text-emerald-400">${parseFloat(balanceData.total_protected || 0).toFixed(2)}</p>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-gray-300">Create Safe Wallet</h3>
               </div>
@@ -395,6 +415,23 @@ export default function WithdrawalPage() {
                       </button>
                     </div>
                   </div>
+
+                  {withdrawalHistory.length > 0 && (
+                    <div className="border-t border-gray-800 pt-4">
+                      <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-3">Withdrawal History</h4>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {withdrawalHistory.slice(0, 20).map((r: any) => (
+                          <div key={r.id} className="flex items-center justify-between bg-gray-800 rounded px-3 py-2 text-sm">
+                            <div>
+                              <span className="text-white font-medium">{r.amount} {r.currency}</span>
+                              <span className="text-gray-500 ml-2">{r.status}</span>
+                            </div>
+                            <span className="text-xs text-gray-600">{r.created_at ? formatTime(r.created_at) : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>

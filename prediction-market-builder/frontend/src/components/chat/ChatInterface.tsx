@@ -31,6 +31,7 @@ export default function ChatInterface() {
 
   function handleSend(content: string) {
     setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'user', content, timestamp: new Date().toISOString() }])
+    chatWs.send('chat_message', { content })
   }
 
   return (

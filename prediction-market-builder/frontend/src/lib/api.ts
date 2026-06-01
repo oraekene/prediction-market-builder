@@ -296,6 +296,97 @@ export async function fetchShapSessionAggregate(sessionId: string): Promise<any>
   return res.json()
 }
 
+export async function deployStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/deploy`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to deploy strategy')
+  return res.json()
+}
+
+export async function pauseStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/pause`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to pause strategy')
+  return res.json()
+}
+
+export async function resumeStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/resume`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to resume strategy')
+  return res.json()
+}
+
+export async function archiveStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/archive`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to archive strategy')
+  return res.json()
+}
+
+export async function rollbackStrategy(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/rollback`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to rollback strategy')
+  return res.json()
+}
+
+export async function fetchStrategyHistory(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/${id}/history`)
+  if (!res.ok) throw new Error('Failed to fetch strategy history')
+  return res.json()
+}
+
+export async function evaluateStrategyData(data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/evaluate`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to evaluate strategy')
+  return res.json()
+}
+
+export async function fetchStrategyTemplates(): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates`)
+  if (!res.ok) throw new Error('Failed to fetch templates')
+  return res.json()
+}
+
+export async function createStrategyTemplate(data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to create template')
+  return res.json()
+}
+
+export async function fetchStrategyTemplate(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates/${id}`)
+  if (!res.ok) throw new Error('Template not found')
+  return res.json()
+}
+
+export async function updateStrategyTemplate(id: string, data: any): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update template')
+  return res.json()
+}
+
+export async function deleteStrategyTemplate(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete template')
+  return res.json()
+}
+
+export async function applyStrategyTemplate(id: string): Promise<any> {
+  const res = await apiFetch(`${BASE_URL}/strategies/templates/${id}/apply`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to apply template')
+  return res.json()
+}
+
 export async function explainFeatures(
   features: Record<string, number>,
   regimeVector?: number[],

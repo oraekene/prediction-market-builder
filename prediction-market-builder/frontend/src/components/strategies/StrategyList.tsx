@@ -1,4 +1,4 @@
-import { useStrategies, useCreateStrategy } from '@/hooks/useStrategies'
+import { useStrategies, useCreateStrategy, useDeployStrategy, usePauseStrategy, useResumeStrategy, useArchiveStrategy, useRollbackStrategy } from '@/hooks/useStrategies'
 import { formatTime } from '@/lib/utils'
 import { useState } from 'react'
 
@@ -34,6 +34,11 @@ export default function StrategyList({ onEditStrategy }: StrategyListProps) {
   const [showTemplates, setShowTemplates] = useState(false)
   const { data: strategies, isLoading, error } = useStrategies()
   const createStrategy = useCreateStrategy()
+  const deployStrategy = useDeployStrategy()
+  const pauseStrategy = usePauseStrategy()
+  const resumeStrategy = useResumeStrategy()
+  const archiveStrategy = useArchiveStrategy()
+  const rollbackStrategy = useRollbackStrategy()
 
   if (isLoading) {
     return <div className="text-gray-400">Loading strategies...</div>
@@ -136,6 +141,53 @@ export default function StrategyList({ onEditStrategy }: StrategyListProps) {
               <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
                 <span className="capitalize">{strategy.mode} mode</span>
                 <span>{strategy.created_at ? formatTime(strategy.created_at) : ''}</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1">
+                {strategy.status === 'draft' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deployStrategy.mutate(strategy.id) }}
+                    disabled={deployStrategy.isPending}
+                    className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white hover:bg-emerald-600 disabled:opacity-50"
+                  >
+                    Deploy
+                  </button>
+                )}
+                {strategy.status === 'active' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); pauseStrategy.mutate(strategy.id) }}
+                    disabled={pauseStrategy.isPending}
+                    className="rounded bg-yellow-700 px-2 py-0.5 text-xs text-white hover:bg-yellow-600 disabled:opacity-50"
+                  >
+                    Pause
+                  </button>
+                )}
+                {strategy.status === 'paused' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); resumeStrategy.mutate(strategy.id) }}
+                    disabled={resumeStrategy.isPending}
+                    className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white hover:bg-emerald-600 disabled:opacity-50"
+                  >
+                    Resume
+                  </button>
+                )}
+                {strategy.status !== 'archived' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); archiveStrategy.mutate(strategy.id) }}
+                    disabled={archiveStrategy.isPending}
+                    className="rounded bg-gray-700 px-2 py-0.5 text-xs text-white hover:bg-gray-600 disabled:opacity-50"
+                  >
+                    Archive
+                  </button>
+                )}
+                {strategy.status !== 'draft' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); rollbackStrategy.mutate(strategy.id) }}
+                    disabled={rollbackStrategy.isPending}
+                    className="rounded bg-orange-700 px-2 py-0.5 text-xs text-white hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    Rollback
+                  </button>
+                )}
               </div>
             </div>
           ))}
