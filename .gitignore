@@ -1,22 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
 .pytest_cache/
-.vite/
-node_modules/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
 env/
-__pycache__/
-*.pyc
-.env
-nousresearch-hermes-agent-*.txt
 
-# Runtime data (auto-generated caches, databases, vector stores)
-prediction-market-builder/backend/data/memory/
-prediction-market-builder/backend/pmbuilder.db
-prediction-market-builder/backend/tests/.pytest_test.db
-prediction-market-builder/backend/data/analytics.duckdb
-prediction-market-builder/backend/data/*.sqlite3
-prediction-market-builder/backend/pm_strategy_builder.egg-info/
-docs/nppBackup/
-prediction-market-builder/backend/*.log
-prediction-market-builder/backend/*.err
-prediction-market-builder/frontend/dist/
+# Node
+node_modules/
+dist/
+.vite/
+
+# Runtime data (databases, vector stores, caches)
+*.db
+*.sqlite3
+*.duckdb
+data/
+**/data/
+chroma/
+
+# Logs and error dumps
+*.log
+*.err
+
+# Env / secrets
+.env
+.env.local
+
+# Editor / OS junk
+nppBackup/
+*.bak
+.DS_Store
+Thumbs.db
+
+# Agent tooling
+.opencode/
