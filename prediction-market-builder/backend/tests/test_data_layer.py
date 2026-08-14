@@ -43,9 +43,13 @@ class TestDuckDB:
                 "liquidity": 50000, "participants": 100, "close_time": None,
                 "status": "open", "last_updated": None,
             })
-            results = mgr.query_markets("category = 'politics'")
+            results = mgr.query_markets(filters=[
+                {"column": "category", "operator": "=", "value": "politics"},
+            ])
             assert len(results) >= 1
             assert results[0]["title"] == "Test Market"
+            with pytest.raises(ValueError, match="Column not allowed"):
+                mgr.query_markets(filters=[{"column": "title; DROP TABLE market_analytics", "operator": "=", "value": "x"}])
         finally:
             settings.duckdb_path = original
             DuckDBManager._instance = None

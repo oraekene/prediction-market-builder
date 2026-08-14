@@ -58,7 +58,7 @@ async def process_message(
         context={"session_id": session_key, "user_id": current_user.id},
     )
     if _watchdog:
-        await _watchdog.track_session_activity(session_key)
+        _watchdog.track_session_activity(session_key)
     return result
 
 

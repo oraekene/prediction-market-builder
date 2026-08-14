@@ -114,7 +114,7 @@ def _check_chromadb() -> bool:
 
 async def _on_unhealthy_handler(check_name: str, check_result: dict) -> None:
     logger.error("UNHEALTHY trigger: %s - %s", check_name, check_result.get("error", "unknown"))
-    await watchdog.track_session_activity("_system")
+    watchdog.track_session_activity("_system")
 
 
 def _on_recovery_handler(check_name: str) -> None:

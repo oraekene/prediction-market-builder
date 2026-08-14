@@ -370,10 +370,15 @@ class SkillCreator:
 
         local_ns: dict[str, Any] = {}
         try:
-            byte_code = compile_restricted_exec(
+            compile_result = compile_restricted_exec(
                 code, filename=f"<skill_{description[:16]}>"
             )
-            exec(byte_code, safe_globals, local_ns)
+            if compile_result.errors:
+                logger.warning(
+                    "Skill restricted-compile errors: %s", compile_result.errors
+                )
+                return None
+            exec(compile_result.code, safe_globals, local_ns)
             handler_fn = local_ns.get("handler")
             if not handler_fn:
                 return None

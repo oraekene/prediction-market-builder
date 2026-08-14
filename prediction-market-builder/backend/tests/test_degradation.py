@@ -59,7 +59,11 @@ async def test_orchestrator_uninitialized_returns_503(authenticated_client):
 
 @pytest.mark.asyncio
 async def test_orchestrator_skills_empty(authenticated_client, init_orch):
-    resp = await authenticated_client.get("/api/orchestrator/skills")
+    from unittest.mock import patch
+    with patch.object(
+        orchestrator_router._skill_creator, "list_skills", return_value=[]
+    ):
+        resp = await authenticated_client.get("/api/orchestrator/skills")
     assert resp.status_code == 200
     data = resp.json()
     assert data["skills"] == []

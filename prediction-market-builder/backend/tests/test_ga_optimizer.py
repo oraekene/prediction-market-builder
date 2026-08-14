@@ -244,6 +244,7 @@ class TestAutoresearchGAIntegration:
 
     @pytest.mark.asyncio
     async def test_run_iteration_returns_new_fields(self):
+        from unittest.mock import AsyncMock
         from app.ai.autoresearch import AutoresearchService
 
         hypothesis = {
@@ -253,7 +254,7 @@ class TestAutoresearchGAIntegration:
             "regime_affinity": ["trending"],
         }
         service = AutoresearchService(tabpfn_service=None)
-        with patch.object(service, "_generate_hypotheses", return_value=[hypothesis]):
+        with patch.object(service, "_generate_hypotheses", new=AsyncMock(return_value=[hypothesis])):
             with patch.object(service.tabpfn, "predict_probability", return_value=0.6):
                 with patch("app.ai.autoresearch.monte_carlo_backtest") as mock_mc:
                     mock_mc.return_value.to_dict.return_value = {"mean_sharpe": 0.8}

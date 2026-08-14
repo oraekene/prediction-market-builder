@@ -260,7 +260,7 @@ class TestWithdrawalStrategiesCRUD:
                 }
             ],
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert "id" in data
         assert data["name"] == "Profit-Take 50%"
@@ -290,7 +290,7 @@ class TestWithdrawalStrategiesCRUD:
         })
 
         resp = await client.get("/api/withdrawal/strategies", headers=headers)
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         strategies = resp.json()
         assert len(strategies) == 2
         names = {s["name"] for s in strategies}
@@ -308,7 +308,7 @@ class TestWithdrawalStrategiesCRUD:
         strategy_id = create.json()["id"]
 
         resp = await client.get(f"/api/withdrawal/strategies/{strategy_id}", headers=headers)
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == strategy_id
         assert data["name"] == "Get Me"
@@ -338,7 +338,7 @@ class TestWithdrawalStrategiesCRUD:
             "name": "Updated Name",
             "description": "Updated desc",
         })
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "Updated Name"
         assert data["description"] == "Updated desc"
@@ -359,7 +359,7 @@ class TestWithdrawalStrategiesCRUD:
         resp = await client.put(f"/api/withdrawal/strategies/{strategy_id}", headers=headers, json={
             "steps": new_steps,
         })
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         assert resp.json()["steps"] == new_steps
 
     @pytest.mark.asyncio
@@ -373,7 +373,7 @@ class TestWithdrawalStrategiesCRUD:
         strategy_id = create.json()["id"]
 
         resp = await client.delete(f"/api/withdrawal/strategies/{strategy_id}", headers=headers)
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
 
         # Verify it's gone
@@ -407,7 +407,7 @@ class TestWithdrawalStrategyEvaluation:
         strategy_id = create.json()["id"]
 
         resp = await client.post(f"/api/withdrawal/strategies/{strategy_id}/evaluate", headers=headers)
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         data = resp.json()
         assert data["strategy_id"] == strategy_id
         assert data["name"] == "Eval Strategy"
@@ -437,7 +437,7 @@ class TestWithdrawalStrategyEvaluation:
         assert create.json()["is_active"] is True
 
         resp = await client.post(f"/api/withdrawal/strategies/{strategy_id}/toggle", headers=headers)
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         data = resp.json()
         assert data["is_active"] is False
 
@@ -540,7 +540,7 @@ class TestWithdrawalCrossUserIsolation:
 
         # User A can see it
         get_a = await client.get(f"/api/withdrawal/strategies/{strategy_id}", headers=headers_a)
-        assert get_a.status_code == 201
+        assert get_a.status_code == 200
 
         # User B cannot see it
         get_b = await client.get(f"/api/withdrawal/strategies/{strategy_id}", headers=headers_b)
@@ -584,7 +584,7 @@ class TestWithdrawalCrossUserIsolation:
 
         # Verify still exists for A
         get_a = await client.get(f"/api/withdrawal/strategies/{strategy_id}", headers=headers_a)
-        assert get_a.status_code == 201
+        assert get_a.status_code == 200
 
 
 class TestWithdrawalFullWorkflow:

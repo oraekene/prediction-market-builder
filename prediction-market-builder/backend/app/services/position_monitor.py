@@ -104,6 +104,9 @@ class PositionMonitor:
                         await self._execute_close(position)
                         break
 
+                if position.status == "active":
+                    self._update_trail_state(position, context)
+
             except Exception:
                 logger.exception("Error checking position %s", position_id)
 
@@ -217,6 +220,79 @@ class PositionMonitor:
         else:
             pnl = (position.entry_price - exit_price) * position.size
         return round(pnl, 6)
+
+    def _update_trail_state(self, position: MonitoredPosition, context: ExecutionContext) -> None:
+        current_price = position.current_market_data.get(
+            "current_odds", position.entry_price
+        )
+
+        for node in position.risk_nodes:
+            if node.get("type") not in ("trailing_stop", "take_profit", "stop_loss"):
+                continue
+
+            node_id = node["id"]
+            data = node.get("data", {})
+            trail_pct = data.get("trail_pct", 0.05)
+            activation_pct = data.get("activation_pct", 0.02)
+            node_type = node["type"]
+
+            if node_type == "trailing_stop":
+                state = position.trail_states.get(node_id, {})
+                high_water = state.get("high_water_mark", position.entry_price)
+                was_activated = state.get("activated", False)
+
+                if position.side == "buy":
+                    gain_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
+                    activated = was_activated or gain_pct >= activation_pct
+                    if current_price > high_water:
+                        high_water = current_price
+                    stop_price = high_water * (1 - trail_pct)
+                    triggered = activated and current_price <= stop_price
+                else:
+                    gain_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
+                    activated = was_activated or gain_pct >= activation_pct
+                    if current_price < high_water or high_water == position.entry_price:
+                        high_water = current_price
+                    stop_price = high_water * (1 + trail_pct)
+                    triggered = activated and current_price >= stop_price
+
+                position.trail_states[node_id] = {
+                    "high_water_mark": high_water,
+                    "stop_price": stop_price,
+                    "activated": activated,
+                    "triggered": triggered,
+                }
+
+            elif node_type == "take_profit":
+                state = position.trail_states.get(node_id, {})
+                take_profit_pct = data.get("take_profit", 0.2)
+
+                if position.side == "buy":
+                    gain_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
+                else:
+                    gain_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
+
+                position.trail_states[node_id] = {
+                    "gain_pct": round(gain_pct, 4),
+                    "take_profit_pct": take_profit_pct,
+                    "triggered": gain_pct >= take_profit_pct,
+                }
+
+            elif node_type == "stop_loss":
+                state = position.trail_states.get(node_id, {})
+                stop_loss_pct = data.get("stop_loss", 0.1)
+
+                if position.side == "buy":
+                    loss_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
+                else:
+                    loss_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
+
+                position.trail_states[node_id] = {
+                    "loss_pct": round(loss_pct, 4),
+                    "stop_loss_pct": stop_loss_pct,
+                    "triggered": loss_pct >= stop_loss_pct,
+                }
+
 
     def register_position(self, position: MonitoredPosition) -> None:
         self._monitored_positions[position.position_id] = position

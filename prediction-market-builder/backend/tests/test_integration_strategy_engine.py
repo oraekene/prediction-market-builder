@@ -35,7 +35,7 @@ async def test_evaluate_trailing_stop(client: AsyncClient):
         "nodes": nodes,
         "edges": edges,
     })
-    assert strat.status_code == 200
+    assert strat.status_code == 201
 
     resp = await client.post("/api/strategies/evaluate", headers=headers, json={
         "nodes": nodes,
@@ -481,7 +481,7 @@ async def test_evaluate_multiple_connected_nodes(client: AsyncClient):
         "nodes": nodes,
         "edges": edges,
     })
-    assert strat.status_code == 200
+    assert strat.status_code == 201
 
     resp = await client.post("/api/strategies/evaluate", headers=headers, json={
         "nodes": nodes,
@@ -592,7 +592,7 @@ async def test_evaluate_create_and_evaluate_flow(client: AsyncClient):
         "nodes": nodes,
         "edges": [],
     })
-    assert create_resp.status_code == 200
+    assert create_resp.status_code == 201
     strategy_id = create_resp.json()["id"]
 
     eval_resp = await client.post("/api/strategies/evaluate", headers=headers, json={

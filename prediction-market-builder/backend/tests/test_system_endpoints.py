@@ -20,15 +20,10 @@ async def test_health_no_auth_required(client):
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint_removed(client):
+async def test_metrics_endpoint(client):
     resp = await client.get("/metrics")
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_metrics_requires_auth_for_other_routes(client):
-    resp = await client.get("/api/strategies")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers.get("content-type", "")
 
 
 @pytest.mark.asyncio

@@ -304,14 +304,18 @@ class AutoresearchService:
         Accepts either a BacktestResult (win_rate/total_pnl) or an MC result
         object exposing mean_win_rate / mean_total_pnl.
         """
-        if hasattr(backtest_result, "win_rate"):
-            win_rate = backtest_result.win_rate
-        elif hasattr(backtest_result, "mean_win_rate"):
-            win_rate = backtest_result.mean_win_rate
-        else:
-            win_rate = 0.0
+        win_rate: float = 0.0
+        for attr in ("win_rate", "mean_win_rate"):
+            value = getattr(backtest_result, attr, None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                win_rate = float(value)
+                break
+        if not isinstance(sharpe, (int, float)) or isinstance(sharpe, bool):
+            sharpe = 0.0
         normalized_sharpe = float(np.clip(sharpe / 2.0, 0.0, 1.0))
         tabpfn_prob = tabpfn_result.get("probability", 0.5)
+        if not isinstance(tabpfn_prob, (int, float)):
+            tabpfn_prob = 0.5
         if preset == "win_rate_max":
             return 0.7 * win_rate + 0.3 * tabpfn_prob
         if preset == "risk_adjusted":

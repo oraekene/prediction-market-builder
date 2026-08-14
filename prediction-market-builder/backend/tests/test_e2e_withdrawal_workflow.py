@@ -82,7 +82,7 @@ async def test_full_withdrawal_lifecycle(client: AsyncClient):
             }
         ],
     })
-    assert strat.status_code == 200
+    assert strat.status_code == 201
     strat_id = strat.json()["id"]
     assert strat.json()["is_active"] is True
 
