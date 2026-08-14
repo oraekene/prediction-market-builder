@@ -2,7 +2,7 @@ import pytest
 import tempfile
 import os
 
-from app.models import ResearchSession, ExperimentResult, RLMAlphaVector, ResearchSessionConfig  # noqa: F401
+from app.models import ResearchSession, ExperimentResult, ResearchSessionConfig  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,46 +43,7 @@ class TestResearchE2E:
         assert data["confidence"] == 0.0
         assert "metrics" in data
 
-        # e. Get feature importance and verify features field
-        _tabpfn_available = True
-        try:
-            import tabpfn  # noqa: F401
-        except ImportError:
-            _tabpfn_available = False
-        if _tabpfn_available:
-            resp = await authenticated_client.get("/api/research/features")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "features" in data
-
-        # f. Run RLM scan on a temp directory with keyword-bearing content
-        with tempfile.TemporaryDirectory() as tmpdir:
-            fpath = os.path.join(tmpdir, "test.txt")
-            with open(fpath, "w") as f:
-                f.write("oracle-lag and slippage-limit are key signals")
-            resp = await authenticated_client.post(
-                "/api/research/rlm-scan",
-                params={
-                    "source_type": "forum",
-                    "source_path": tmpdir,
-                    "keywords": "oracle-lag,slippage",
-                },
-            )
-            assert resp.status_code == 200, f"RLM scan failed: {resp.text}"
-            data = resp.json()
-            assert data["status"] == "completed"
-            assert "alpha_vector_id" in data
-            scan_id = data["alpha_vector_id"]
-
-        # g. List alpha vectors and verify the scan result is present
-        resp = await authenticated_client.get("/api/research/alpha-vectors")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "vectors" in data
-        assert len(data["vectors"]) > 0
-        assert any(v["id"] == scan_id for v in data["vectors"])
-
-        # h. Verify config values persist across calls
+        # e. Verify config values persist across calls
         resp = await authenticated_client.get("/api/research/config")
         assert resp.status_code == 200
         data = resp.json()

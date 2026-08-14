@@ -56,7 +56,7 @@ async def test_markets_list_with_min_volume(authenticated_client):
 @pytest.mark.asyncio
 async def test_markets_get_detail(authenticated_client):
     resp = await authenticated_client.get("/api/markets/some-market-id")
-    assert resp.status_code == 200
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

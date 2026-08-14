@@ -11,7 +11,7 @@ async def test_create_risk_template(authenticated_client):
             {"condition": {"type": "always", "params": {}}, "action": {"type": "approve", "params": {}}},
         ],
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
     assert body["name"] == "Aggressive Kelly"
     assert len(body["rules"]) == 2

@@ -2,6 +2,13 @@ import duckdb
 from datetime import datetime
 from app.config import settings
 
+_ALLOWED_COLUMNS = {
+    "id", "platform", "title", "category", "current_odds",
+    "volume", "liquidity", "participants", "close_time",
+    "status", "last_updated",
+}
+_ALLOWED_OPERATORS = {"=", "!=", ">", "<", ">=", "<=", "LIKE", "IN"}
+
 
 class DuckDBManager:
     _instance = None
@@ -52,10 +59,40 @@ class DuckDBManager:
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_market_close_time ON market_analytics(close_time)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_strat_perf_id ON strategy_performance(strategy_id)")
 
-    def query_markets(self, sql_filter: str = "1=1", limit: int = 1000) -> list[dict]:
-        safe_filter = sql_filter.replace(";", "").strip()
+    def query_markets(
+        self,
+        filters: list[dict] | None = None,
+        limit: int = 1000,
+    ) -> list[dict]:
+        """Query markets with whitelisted column/operator/value filters.
+
+        ``filters`` is a list of dicts: {"column", "operator", "value"}.
+        Values are always passed as bound parameters — no string
+        interpolation, so raw SQL filters can never reach the engine.
+        """
+        clauses = []
+        params: list = []
+        for f in filters or []:
+            column = f.get("column")
+            operator = f.get("operator", "=")
+            value = f.get("value")
+            if column not in _ALLOWED_COLUMNS:
+                raise ValueError(f"Column not allowed: {column!r}")
+            if operator not in _ALLOWED_OPERATORS:
+                raise ValueError(f"Operator not allowed: {operator!r}")
+            if operator == "IN":
+                if not isinstance(value, (list, tuple)):
+                    raise ValueError("IN operator requires a list value")
+                placeholders = ",".join("?" for _ in value)
+                clauses.append(f'"{column}" IN ({placeholders})')
+                params.extend(value)
+            else:
+                clauses.append(f'"{column}" {operator} ?')
+                params.append(value)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         result = self.conn.execute(
-            "SELECT * FROM market_analytics WHERE {} ORDER BY volume DESC LIMIT ?".format(safe_filter), [limit]
+            f"SELECT * FROM market_analytics{where} ORDER BY volume DESC LIMIT ?",
+            params + [limit],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]

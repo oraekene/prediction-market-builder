@@ -11,13 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session, async_session
 from app.models.research_session import ResearchSession, SessionStatus, SessionMode
 from app.models.experiment_result import ExperimentResult
-from app.models.rlm_alpha_vector import RLMAlphaVector
 from app.models.research_config import ResearchSessionConfig
+from app.models.rlm_alpha_vector import RLMAlphaVector
+from app.models.user import User
 from app.services.research_scheduler import ResearchScheduler
 from app.ai.market_regime_service import MarketRegimeService
 from app.ai.tabpfn_service import TabPFNService
 from app.ai.rlm_service import RLMService
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, get_user_from_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ rlm_service = RLMService()
 
 _ws_connections: dict[str, set[WebSocket]] = {}
 _ws_lock: Any = None
+
+_VALID_PRESETS = ("sharpe_max", "win_rate_max", "risk_adjusted")
 
 
 def init_scheduler(research_scheduler: ResearchScheduler) -> None:
@@ -62,21 +65,32 @@ async def broadcast_to_session(session_id: str, event: dict[str, Any]) -> None:
                 _ws_connections[session_id] -= dead
 
 
-def _get_user_id_from_context() -> str:
-    return "default"
+def _require_scheduler() -> ResearchScheduler:
+    if not scheduler:
+        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
+    return scheduler
+
+
+async def _get_owned_session(session_id: str, user: User) -> ResearchSession:
+    s = await _require_scheduler().get_session(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if s.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return s
 
 
 @router.post("/run")
 async def trigger_run(
     strategy_id: str | None = Query(None),
     preset: str = Query("sharpe_max"),
-    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    user_id = _get_user_id_from_context()
+    _require_scheduler()
+    if preset not in _VALID_PRESETS:
+        raise HTTPException(status_code=422, detail=f"preset must be one of {_VALID_PRESETS}")
     result = await scheduler.start_session(
-        user_id=user_id,
+        user_id=current_user.id,
         strategy_id=strategy_id,
         mode=SessionMode.MANUAL,
         trigger_type="manual",
@@ -91,13 +105,13 @@ async def trigger_run(
 async def trigger_continuous(
     strategy_id: str | None = Query(None),
     preset: str = Query("sharpe_max"),
-    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    user_id = _get_user_id_from_context()
+    _require_scheduler()
+    if preset not in _VALID_PRESETS:
+        raise HTTPException(status_code=422, detail=f"preset must be one of {_VALID_PRESETS}")
     result = await scheduler.start_session(
-        user_id=user_id,
+        user_id=current_user.id,
         strategy_id=strategy_id,
         mode=SessionMode.CONTINUOUS,
         trigger_type="continuous",
@@ -108,33 +122,23 @@ async def trigger_continuous(
     return {"session_id": result.id, "status": "started"}
 
 
-@router.post("/stop")
-async def stop_research(
-    session_id: str = Query(...),
-    session: AsyncSession = Depends(get_session),
-):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    success = await scheduler.stop_session(session_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"status": "stopped"}
-
-
 @router.post("/sessions")
 async def create_session(
-    strategy_id: str | None = None,
-    mode: str = "manual",
-    trigger_type: str | None = None,
-    preset: str = "sharpe_max",
-    db_session: AsyncSession = Depends(get_session),
+    strategy_id: str | None = Query(None),
+    mode: str = Query("manual"),
+    trigger_type: str | None = Query(None),
+    preset: str = Query("sharpe_max"),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    mode_enum = SessionMode(mode) if mode in ("manual", "cron", "continuous") else SessionMode.MANUAL
-    user_id = _get_user_id_from_context()
+    _require_scheduler()
+    if preset not in _VALID_PRESETS:
+        raise HTTPException(status_code=422, detail=f"preset must be one of {_VALID_PRESETS}")
+    try:
+        mode_enum = SessionMode(mode)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="mode must be one of manual, cron, continuous")
     result = await scheduler.start_session(
-        user_id=user_id,
+        user_id=current_user.id,
         strategy_id=strategy_id,
         mode=mode_enum,
         trigger_type=trigger_type,
@@ -145,19 +149,30 @@ async def create_session(
     return {"session_id": result.id, "status": "created"}
 
 
+@router.post("/stop")
+async def stop_research(
+    session_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    _require_scheduler()
+    await _get_owned_session(session_id, current_user)
+    success = await scheduler.stop_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "stopped"}
+
+
 @router.get("/sessions")
 async def list_sessions(
     limit: int = Query(20, le=100),
-    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    sessions = await scheduler.get_user_sessions(_get_user_id_from_context())
+    _require_scheduler()
+    sessions = await scheduler.get_user_sessions(current_user.id, limit)
     return {
         "sessions": [
             {
                 "id": s.id,
-                "user_id": s.user_id,
                 "strategy_id": s.strategy_id,
                 "status": s.status.value,
                 "mode": s.mode.value,
@@ -167,7 +182,6 @@ async def list_sessions(
                 "best_sharpe": s.best_sharpe,
                 "composite_preset": s.composite_preset.value,
                 "toto2_regime": s.toto2_regime,
-                "pareto_front": s.pareto_front,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in sessions
@@ -179,16 +193,12 @@ async def list_sessions(
 @router.get("/sessions/{session_id}")
 async def get_session_detail(
     session_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
-    s = await scheduler.get_session(session_id)
-    if not s:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _require_scheduler()
+    s = await _get_owned_session(session_id, current_user)
     return {
         "id": s.id,
-        "user_id": s.user_id,
         "strategy_id": s.strategy_id,
         "status": s.status.value,
         "mode": s.mode.value,
@@ -201,12 +211,10 @@ async def get_session_detail(
         "avg_win_rate": s.avg_win_rate,
         "best_sharpe": s.best_sharpe,
         "best_win_rate": s.best_win_rate,
-        "rlm_alpha_vector_id": s.rlm_alpha_vector_id,
         "toto2_regime": s.toto2_regime,
         "toto2_volatility": s.toto2_volatility,
         "tabpfn_top_features": s.tabpfn_top_features,
         "hypothesis_count": s.hypothesis_count,
-        "pareto_front": s.pareto_front,
         "error_message": s.error_message,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
@@ -217,10 +225,10 @@ async def get_session_detail(
 async def get_session_results(
     session_id: str,
     limit: int = Query(50, le=200),
-    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    if not scheduler:
-        raise HTTPException(status_code=503, detail="Research scheduler not initialized")
+    _require_scheduler()
+    await _get_owned_session(session_id, current_user)
     results = await scheduler.get_session_results(session_id)
     return {
         "results": [
@@ -249,14 +257,29 @@ async def get_session_results(
 
 @router.get("/stats")
 async def get_stats(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    total_sessions = await db.scalar(select(func.count(ResearchSession.id)))
-    total_kept = await db.scalar(select(func.coalesce(func.sum(ResearchSession.total_kept), 0)))
-    total_reverted = await db.scalar(select(func.coalesce(func.sum(ResearchSession.total_reverted), 0)))
-    avg_sharpe = await db.scalar(select(func.avg(ResearchSession.avg_sharpe)))
-    avg_win = await db.scalar(select(func.avg(ResearchSession.avg_win_rate)))
-    best_sharpe = await db.scalar(select(func.max(ResearchSession.best_sharpe)))
+    total_sessions = await db.scalar(
+        select(func.count(ResearchSession.id)).where(ResearchSession.user_id == current_user.id)
+    )
+    total_kept = await db.scalar(
+        select(func.coalesce(func.sum(ResearchSession.total_kept), 0))
+        .where(ResearchSession.user_id == current_user.id)
+    )
+    total_reverted = await db.scalar(
+        select(func.coalesce(func.sum(ResearchSession.total_reverted), 0))
+        .where(ResearchSession.user_id == current_user.id)
+    )
+    avg_sharpe = await db.scalar(
+        select(func.avg(ResearchSession.avg_sharpe)).where(ResearchSession.user_id == current_user.id)
+    )
+    avg_win = await db.scalar(
+        select(func.avg(ResearchSession.avg_win_rate)).where(ResearchSession.user_id == current_user.id)
+    )
+    best_sharpe = await db.scalar(
+        select(func.max(ResearchSession.best_sharpe)).where(ResearchSession.user_id == current_user.id)
+    )
     return {
         "total_sessions": total_sessions or 0,
         "total_kept": total_kept or 0,
@@ -270,24 +293,34 @@ async def get_stats(
 
 @router.get("/config")
 async def get_config(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    user_id = _get_user_id_from_context()
     result = await db.execute(
-        select(ResearchSessionConfig).where(ResearchSessionConfig.user_id == user_id)
+        select(ResearchSessionConfig).where(ResearchSessionConfig.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
     if not config:
-        return {"preset": "sharpe_max", "max_concurrent": 2, "cron_enabled": False, "enable_genetic_optimization": False}
+        return {
+            "preset": "sharpe_max",
+            "max_concurrent": 2,
+            "cron_enabled": False,
+            "continuous_enabled": False,
+            "cron_interval_minutes": None,
+            "max_hypotheses_per_session": 50,
+            "rlm_cron_enabled": False,
+            "rlm_cron_interval_minutes": None,
+            "enable_genetic_optimization": False,
+        }
     return {
         "preset": config.composite_preset,
         "max_concurrent": config.max_concurrent,
         "cron_enabled": config.cron_enabled,
         "cron_interval_minutes": config.cron_interval_minutes,
         "continuous_enabled": config.continuous_enabled,
+        "max_hypotheses_per_session": config.max_hypotheses_per_session,
         "rlm_cron_enabled": config.rlm_cron_enabled,
         "rlm_cron_interval_minutes": config.rlm_cron_interval_minutes,
-        "max_hypotheses_per_session": config.max_hypotheses_per_session,
         "enable_genetic_optimization": config.enable_genetic_optimization,
     }
 
@@ -301,15 +334,17 @@ async def update_config(
     continuous_enabled: bool | None = Query(None),
     max_hypotheses: int | None = Query(None),
     enable_genetic_optimization: bool | None = Query(None),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    user_id = _get_user_id_from_context()
+    if preset is not None and preset not in _VALID_PRESETS:
+        raise HTTPException(status_code=422, detail=f"preset must be one of {_VALID_PRESETS}")
     result = await db.execute(
-        select(ResearchSessionConfig).where(ResearchSessionConfig.user_id == user_id)
+        select(ResearchSessionConfig).where(ResearchSessionConfig.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
     if not config:
-        config = ResearchSessionConfig(user_id=user_id)
+        config = ResearchSessionConfig(user_id=current_user.id)
         db.add(config)
     if preset is not None:
         config.composite_preset = preset
@@ -330,18 +365,15 @@ async def update_config(
 
 
 @router.get("/climate")
-async def get_climate(
-    session: AsyncSession = Depends(get_session),
-):
+async def get_climate(current_user: User = Depends(get_current_user)):
     climate = await market_regime_service.assess_climate([])
     return climate
 
 
 @router.get("/features")
-async def get_features(
-    session: AsyncSession = Depends(get_session),
-):
-    df = _empty_feature_df()
+async def get_features(current_user: User = Depends(get_current_user)):
+    import pandas as pd
+    df = pd.DataFrame()
     features = await tabpfn_service.get_feature_importance(df)
     return {"features": features}
 
@@ -349,10 +381,12 @@ async def get_features(
 @router.get("/alpha-vectors")
 async def list_alpha_vectors(
     limit: int = Query(10, le=50),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     result = await db.execute(
         select(RLMAlphaVector)
+        .where(RLMAlphaVector.user_id == current_user.id)
         .order_by(RLMAlphaVector.created_at.desc())
         .limit(limit)
     )
@@ -377,17 +411,22 @@ async def trigger_rlm_scan(
     source_type: str = Query("forum"),
     source_path: str | None = Query(None),
     keywords: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     keywords_list = keywords.split(",") if keywords else None
-    result = await rlm_service.scan_directory(
-        directory=source_path or "./data/archives",
-        keywords=keywords_list,
-    )
+    try:
+        result = await rlm_service.scan_directory(
+            directory=source_path or ".",
+            keywords=keywords_list,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     alpha_vector = RLMAlphaVector(
+        user_id=current_user.id,
         source_type=source_type,
-        source_path=source_path or "./data/archives",
-        source_hash=rlm_service.compute_source_hash(source_path or "./data/archives"),
+        source_path=source_path or ".",
+        source_hash=rlm_service.compute_source_hash(source_path or "."),
         token_count=result.get("token_estimate", 0),
         alpha_vector=result.get("alpha_vector", {}),
         sub_agent_traces=rlm_service.get_accumulated_state(),
@@ -405,7 +444,7 @@ async def trigger_rlm_drift(
     historical_texts: list[str] = Query(...),
     recent_texts: list[str] = Query(...),
     entities: str = Query(...),
-    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     entities_list = [e.strip() for e in entities.split(",") if e.strip()]
     result = await rlm_service.detect_linguistic_drift(
@@ -420,7 +459,7 @@ async def trigger_rlm_drift(
 async def trigger_rlm_text_batch(
     texts: list[str] = Query(...),
     query: str = Query(...),
-    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     result = await rlm_service.scan_text_batch(
         texts=texts,
@@ -431,23 +470,28 @@ async def trigger_rlm_text_batch(
 
 @router.post("/rlm-pipeline")
 async def trigger_rlm_pipeline(
-    directory: str = Query("./data/archives"),
+    directory: str = Query("."),
     keywords: str | None = Query(None),
     historical_texts: list[str] | None = Query(None),
     recent_texts: list[str] | None = Query(None),
     entities: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     keywords_list = keywords.split(",") if keywords else None
     entities_list = [e.strip() for e in entities.split(",") if e.strip()] if entities else None
-    result = await rlm_service.run_pipeline(
-        directory=directory,
-        keywords=keywords_list,
-        historical_texts=historical_texts,
-        recent_texts=recent_texts,
-        entities=entities_list,
-    )
+    try:
+        result = await rlm_service.run_pipeline(
+            directory=directory,
+            keywords=keywords_list,
+            historical_texts=historical_texts,
+            recent_texts=recent_texts,
+            entities=entities_list,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     alpha_vector = RLMAlphaVector(
+        user_id=current_user.id,
         source_type="pipeline",
         source_path=directory,
         source_hash=rlm_service.compute_source_hash(directory),
@@ -471,21 +515,28 @@ async def trigger_rlm_pipeline(
 
 
 @router.get("/rlm-trajectory")
-async def get_rlm_trajectory():
+async def get_rlm_trajectory(current_user: User = Depends(get_current_user)):
     trajectory = rlm_service.inspect_last_trajectory()
     return {"trajectory": trajectory, "available": trajectory is not None}
 
 
 @router.get("/rlm-state")
-async def get_rlm_accumulated_state():
+async def get_rlm_accumulated_state(current_user: User = Depends(get_current_user)):
     state = rlm_service.get_accumulated_state()
     return {"state": state, "count": len(state)}
 
 
 @router.get("/rlm/trace/{vector_id}")
-async def get_rlm_trace(vector_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(RLMAlphaVector).where(RLMAlphaVector.id == vector_id)
+async def get_rlm_trace(
+    vector_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    result = await db.execute(
+        select(RLMAlphaVector).where(
+            RLMAlphaVector.id == vector_id,
+            RLMAlphaVector.user_id == current_user.id,
+        )
     )
     vector = result.scalar_one_or_none()
     if not vector:
@@ -504,6 +555,22 @@ async def get_rlm_trace(vector_id: str, session: AsyncSession = Depends(get_sess
 
 @ws_router.websocket("/ws/research/{session_id}")
 async def research_websocket(websocket: WebSocket, session_id: str):
+    token = websocket.query_params.get("token")
+    try:
+        user = await get_user_from_token(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(ResearchSession).where(ResearchSession.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if not session or session.user_id != user.id:
+            await websocket.close(code=4404)
+            return
+
     await websocket.accept()
     lock = await _get_ws_lock()
     async with lock:
@@ -523,17 +590,11 @@ async def research_websocket(websocket: WebSocket, session_id: str):
                     await websocket.send_json({"type": "paused"})
                 elif msg_type == "resume":
                     if scheduler:
-                        async with async_session() as db:
-                            result = await db.execute(
-                                select(ResearchSession).where(ResearchSession.id == session_id)
-                            )
-                            s = result.scalar_one_or_none()
-                            if s:
-                                await scheduler.start_session(
-                                    user_id=s.user_id,
-                                    strategy_id=s.strategy_id,
-                                    mode=SessionMode.MANUAL,
-                                )
+                        await scheduler.start_session(
+                            user_id=user.id,
+                            strategy_id=session.strategy_id,
+                            mode=SessionMode.MANUAL,
+                        )
                     await websocket.send_json({"type": "resumed"})
                 elif msg_type == "stop":
                     if scheduler:
@@ -548,8 +609,3 @@ async def research_websocket(websocket: WebSocket, session_id: str):
         async with lock:
             if session_id in _ws_connections:
                 _ws_connections[session_id].discard(websocket)
-
-
-def _empty_feature_df():
-    import pandas as pd
-    return pd.DataFrame()

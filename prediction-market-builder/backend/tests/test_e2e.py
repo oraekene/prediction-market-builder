@@ -48,7 +48,7 @@ async def test_strategy_full_lifecycle(e2e_client):
     response = await e2e_client.post("/api/strategies", json={
         "name": "E2E Strategy", "description": "e2e test", "mode": "chat",
     })
-    assert response.status_code == 200
+    assert response.status_code == 201
     sid = response.json()["id"]
 
     response = await e2e_client.get(f"/api/strategies/{sid}")
@@ -75,7 +75,7 @@ async def test_template_full_lifecycle(e2e_client):
     response = await e2e_client.post("/api/strategies/templates", json={
         "name": "E2E Template", "config": {"mode": "chat"}, "tags": ["e2e"],
     })
-    assert response.status_code == 200
+    assert response.status_code == 201
     tid = response.json()["id"]
 
     response = await e2e_client.get(f"/api/strategies/templates/{tid}")
@@ -87,7 +87,7 @@ async def test_template_full_lifecycle(e2e_client):
     assert response.json()["name"] == "Updated Template"
 
     response = await e2e_client.post(f"/api/strategies/templates/{tid}/apply")
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["name"] == "Updated Template"
 
     response = await e2e_client.delete(f"/api/strategies/templates/{tid}")

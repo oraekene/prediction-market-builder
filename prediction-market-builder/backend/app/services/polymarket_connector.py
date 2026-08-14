@@ -145,9 +145,15 @@ class PolymarketConnector(ExchangeConnector):
                 error=str(e),
             )
 
-    async def cancel_order(self, platform_order_id: str) -> bool:
+    async def cancel_order(self, platform_order_id: str, credentials: dict | None = None) -> bool:
+        credentials = credentials or {}
         try:
-            await self._request("DELETE", f"/order/{platform_order_id}")
+            await self._request(
+                "DELETE",
+                f"/order/{platform_order_id}",
+                api_key=credentials.get("api_key", ""),
+                secret=credentials.get("secret", ""),
+            )
             return True
         except Exception:
             return False

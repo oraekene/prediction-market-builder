@@ -114,12 +114,28 @@ class RLMService:
     for white-box debugging. Falls back gracefully when dspy is not installed.
     """
 
-    def __init__(self):
+    def __init__(self, archive_root: str | None = None):
         self._available: bool | None = None
         self._last_trajectory: str | None = None
         self._drift_detector = LinguisticDriftDetector()
+        from app.config import settings
+        self._archive_root = os.path.realpath(
+            archive_root or getattr(settings, "rlm_archive_root", "./data/archives")
+        )
         self._token_budget: int = 1_000_000
         self._accumulated_state: list[dict[str, Any]] = []
+
+    def _confine_archive_path(self, path: str | None) -> str:
+        """Resolve a user-supplied path and require it to live inside the archive root.
+
+        Raises ValueError for absolute paths outside the root, relative
+        traversal (``..``), or paths that don't exist.
+        """
+        root = self._archive_root
+        candidate = os.path.realpath(os.path.join(root, path or "."))
+        if os.path.commonpath([root, candidate]) != root:
+            raise ValueError("Path is outside the RLM archive root")
+        return candidate
 
     # ── Availability ──────────────────────────────────────────────────────────
 
@@ -194,6 +210,8 @@ class RLMService:
     ) -> dict[str, Any]:
         self._reset_budget(max_tokens)
         self._accumulated_state = []
+
+        directory = self._confine_archive_path(directory)
 
         if not os.path.isdir(directory):
             return {
@@ -487,6 +505,7 @@ class RLMService:
           Process: Recursive REPL → programmatic filter → sub-agent analysis → pattern detection
           Output: Structured Alpha Vector
         """
+        directory = self._confine_archive_path(directory)
         scan_result = await self.scan_directory(
             directory=directory,
             keywords=keywords,
@@ -589,6 +608,29 @@ class RLMService:
         return self._last_trajectory
 
     def compute_source_hash(self, source_path: str) -> str:
+        """Content hash of a file or directory (never the path string)."""
+        try:
+            if os.path.isfile(source_path):
+                h = hashlib.sha256()
+                with open(source_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        h.update(chunk)
+                return h.hexdigest()
+            if os.path.isdir(source_path):
+                h = hashlib.sha256()
+                for root, _dirs, fnames in sorted(os.walk(source_path)):
+                    for fname in sorted(fnames):
+                        fpath = os.path.join(root, fname)
+                        h.update(fpath.encode())
+                        try:
+                            with open(fpath, "rb") as f:
+                                for chunk in iter(lambda: f.read(65536), b""):
+                                    h.update(chunk)
+                        except OSError:
+                            continue
+                return h.hexdigest()
+        except OSError:
+            return ""
         return hashlib.sha256(source_path.encode()).hexdigest()
 
     def get_accumulated_state(self) -> list[dict[str, Any]]:
@@ -599,7 +641,7 @@ class RLMService:
         directory: str,
         keywords: list[str] | None = None,
     ) -> dict[str, Any]:
-        return await self._fallback_scan(directory, keywords)
+        return await self._fallback_scan(self._confine_archive_path(directory), keywords)
 
     async def _fallback_scan(self, directory: str, keywords: list[str] | None = None) -> dict[str, Any]:
         findings: list[dict[str, Any]] = []

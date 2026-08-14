@@ -26,18 +26,22 @@ async def test_concurrent_strategy_creations(authenticated_client):
 
     results = await asyncio.gather(*[create_strategy(i) for i in range(5)])
     for resp in results:
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         assert "id" in resp.json()
 
 
 @pytest.mark.asyncio
 async def test_concurrent_repl_sessions(authenticated_client):
+    from app.routers import repl as repl_router
+    from app.ai.repl_service import REPLService
+    repl_router.init_repl(REPLService())
+
     async def create_session():
         return await authenticated_client.post("/ai/repl/create")
 
     results = await asyncio.gather(*[create_session() for _ in range(5)])
     for resp in results:
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
 
 @pytest.mark.asyncio
@@ -97,4 +101,4 @@ async def test_concurrent_auth_and_strategy(authenticated_client):
 
     results = await asyncio.gather(list_strategies(), create_strategy(), list_strategies(), create_strategy())
     for resp in results:
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 201)

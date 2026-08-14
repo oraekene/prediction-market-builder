@@ -7,6 +7,7 @@ from typing import Any
 from app.services.node_executor import NodeRegistry, GraphExecutor, ExecutionContext
 from app.services.risk_calculator import RiskCalculator
 from app.services.portfolio_manager import PortfolioManager
+from app.services.risk_manager import get_risk_registry
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class PositionMonitor:
         self._task: asyncio.Task | None = None
         self._risk_calculator = RiskCalculator()
         self._portfolio_manager = PortfolioManager()
-        self._node_registry = NodeRegistry()
+        self._node_registry = get_risk_registry()
         self._graph_executor = GraphExecutor(self._node_registry)
         self._lock = asyncio.Lock()
 
@@ -84,23 +85,24 @@ class PositionMonitor:
         for position_id, position in active.items():
             try:
                 context = self._build_context(position)
-                result = await self._graph_executor.execute(
-                    position.risk_nodes,
-                    position.risk_edges,
-                    context,
-                )
 
-                violations = result.get("violations", [])
-                approved = result.get("approved", True)
-
-                if not approved or violations:
-                    logger.info(
-                        "Position %s triggered risk check: approved=%s violations=%s",
-                        position_id, approved, violations,
-                    )
-                    await self._execute_close(position)
-
-                self._update_trail_state(position, context)
+                for node in position.risk_nodes:
+                    result = await self._graph_executor.execute([node], [], context)
+                    if result.get("error"):
+                        logger.warning(
+                            "Risk node %s errored for position %s: %s",
+                            node.get("type"), position_id, result["error"],
+                        )
+                        continue
+                    triggered = bool(result.get("triggered"))
+                    violations = result.get("violations") or []
+                    if triggered or (violations and not result.get("approved", True)):
+                        logger.info(
+                            "Position %s triggered risk node %s: %s",
+                            position_id, node.get("type"), result,
+                        )
+                        await self._execute_close(position)
+                        break
 
             except Exception:
                 logger.exception("Error checking position %s", position_id)
@@ -161,11 +163,18 @@ class PositionMonitor:
                         user=user,
                         strategy_id=position.strategy_id,
                     )
+                    fill_status = fill.status if hasattr(fill, "status") else None
                     logger.info(
                         "Closed position %s via execution engine: fill=%s",
                         position.position_id,
-                        fill.status if hasattr(fill, "status") else fill,
+                        fill_status,
                     )
+                    if fill_status not in ("filled", "partial"):
+                        logger.warning(
+                            "Close order for position %s did not fill (status=%s); keeping position active",
+                            position.position_id, fill_status,
+                        )
+                        return
                 elif hasattr(self.execution_engine, "simulate_fill"):
                     order_book = self.execution_engine.get_order_book(
                         position.platform,
@@ -179,6 +188,12 @@ class PositionMonitor:
                         price=current_price,
                         order_book=order_book,
                     )
+                    if not fill.get("filled"):
+                        logger.warning(
+                            "Simulated close for position %s did not fill; keeping position active",
+                            position.position_id,
+                        )
+                        return
                     logger.info(
                         "Closed position %s via simulated fill: %s",
                         position.position_id,
@@ -194,12 +209,7 @@ class PositionMonitor:
                 position.current_market_data["pnl"] = pnl
 
         except Exception:
-            logger.exception("Failed to close position %s", position.position_id)
-            async with self._lock:
-                position.status = "closed"
-                position.current_market_data["exit_price"] = current_price
-                position.current_market_data["exit_time"] = datetime.now(timezone.utc).isoformat()
-                position.current_market_data["close_error"] = True
+            logger.exception("Failed to close position %s; will retry", position.position_id)
 
     def _compute_pnl(self, position: MonitoredPosition, exit_price: float) -> float:
         if position.side == "buy":
@@ -207,78 +217,6 @@ class PositionMonitor:
         else:
             pnl = (position.entry_price - exit_price) * position.size
         return round(pnl, 6)
-
-    def _update_trail_state(self, position: MonitoredPosition, context: ExecutionContext) -> None:
-        current_price = position.current_market_data.get(
-            "current_odds", position.entry_price
-        )
-
-        for node in position.risk_nodes:
-            if node.get("type") not in ("trailing_stop", "take_profit", "stop_loss"):
-                continue
-
-            node_id = node["id"]
-            data = node.get("data", {})
-            trail_pct = data.get("trail_pct", 0.05)
-            activation_pct = data.get("activation_pct", 0.02)
-            node_type = node["type"]
-
-            if node_type == "trailing_stop":
-                state = position.trail_states.get(node_id, {})
-                high_water = state.get("high_water_mark", position.entry_price)
-                was_activated = state.get("activated", False)
-
-                if position.side == "buy":
-                    gain_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
-                    activated = was_activated or gain_pct >= activation_pct
-                    if current_price > high_water:
-                        high_water = current_price
-                    stop_price = high_water * (1 - trail_pct)
-                    triggered = activated and current_price <= stop_price
-                else:
-                    gain_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
-                    activated = was_activated or gain_pct >= activation_pct
-                    if current_price < high_water or high_water == position.entry_price:
-                        high_water = current_price
-                    stop_price = high_water * (1 + trail_pct)
-                    triggered = activated and current_price >= stop_price
-
-                position.trail_states[node_id] = {
-                    "high_water_mark": high_water,
-                    "stop_price": stop_price,
-                    "activated": activated,
-                    "triggered": triggered,
-                }
-
-            elif node_type == "take_profit":
-                state = position.trail_states.get(node_id, {})
-                take_profit_pct = data.get("take_profit", 0.2)
-
-                if position.side == "buy":
-                    gain_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
-                else:
-                    gain_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
-
-                position.trail_states[node_id] = {
-                    "gain_pct": round(gain_pct, 4),
-                    "take_profit_pct": take_profit_pct,
-                    "triggered": gain_pct >= take_profit_pct,
-                }
-
-            elif node_type == "stop_loss":
-                state = position.trail_states.get(node_id, {})
-                stop_loss_pct = data.get("stop_loss", 0.1)
-
-                if position.side == "buy":
-                    loss_pct = (position.entry_price - current_price) / position.entry_price if position.entry_price > 0 else 0
-                else:
-                    loss_pct = (current_price - position.entry_price) / position.entry_price if position.entry_price > 0 else 0
-
-                position.trail_states[node_id] = {
-                    "loss_pct": round(loss_pct, 4),
-                    "stop_loss_pct": stop_loss_pct,
-                    "triggered": loss_pct >= stop_loss_pct,
-                }
 
     def register_position(self, position: MonitoredPosition) -> None:
         self._monitored_positions[position.position_id] = position

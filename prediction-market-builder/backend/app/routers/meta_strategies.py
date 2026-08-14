@@ -1,23 +1,24 @@
 import math
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from pydantic import BaseModel
 
 from app.database import get_session
 from app.models.meta_strategy import MetaStrategy, MetaStrategyMode
 from app.models.strategy import Strategy
 from app.models.trade import Trade, TradeStatus
+from app.models.user import User
+from app.routers.auth import get_current_user
 
 
 router = APIRouter(prefix="/api/meta-strategies", tags=["meta-strategies"])
 
 
 class CreateMetaStrategyRequest(BaseModel):
-    user_id: str = "default"
     name: str = "New Meta-Strategy"
     description: str | None = None
     mode: MetaStrategyMode = MetaStrategyMode.COMPETITION
@@ -39,6 +40,36 @@ class UpdateMetaStrategyRequest(BaseModel):
     confluence_config: dict | None = None
     consumer: str | None = None
     current_winner_id: str | None = None
+
+
+def _serialize_ms(ms: MetaStrategy) -> dict:
+    return {
+        "id": ms.id,
+        "user_id": ms.user_id,
+        "name": ms.name,
+        "description": ms.description,
+        "mode": ms.mode,
+        "status": ms.status,
+        "strategy_ids": ms.strategy_ids,
+        "scoring_config": ms.scoring_config,
+        "promotion_config": ms.promotion_config,
+        "confluence_config": ms.confluence_config,
+        "consumer": ms.consumer,
+        "current_winner_id": ms.current_winner_id,
+        "last_promotion_at": ms.last_promotion_at.isoformat() if ms.last_promotion_at else None,
+        "created_at": ms.created_at.isoformat() if ms.created_at else None,
+        "updated_at": ms.updated_at.isoformat() if ms.updated_at else None,
+    }
+
+
+async def _get_owned_ms(ms_id: str, user: User, session: AsyncSession) -> MetaStrategy:
+    result = await session.execute(
+        select(MetaStrategy).where(MetaStrategy.id == ms_id, MetaStrategy.user_id == user.id)
+    )
+    ms = result.scalar_one_or_none()
+    if not ms:
+        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+    return ms
 
 
 def _compute_default_score(trades: list[dict[str, Any]], weights: dict[str, float] | None = None) -> dict[str, Any]:
@@ -109,11 +140,12 @@ def _should_promote(ms: MetaStrategy) -> bool:
     return elapsed >= interval_seconds
 
 
-async def _fetch_trades(session: AsyncSession, strategy_id: str) -> list[dict[str, Any]]:
+async def _fetch_trades(session: AsyncSession, strategy_id: str, user: User) -> list[dict[str, Any]]:
     result = await session.execute(
         select(Trade).where(
             Trade.strategy_id == strategy_id,
             Trade.status == TradeStatus.EXECUTED,
+            Trade.user_id == user.id,
         ).order_by(Trade.executed_at.desc()).limit(200)
     )
     return [
@@ -123,17 +155,33 @@ async def _fetch_trades(session: AsyncSession, strategy_id: str) -> list[dict[st
 
 
 @router.get("")
-async def list_meta_strategies(user_id: str = "default", session: AsyncSession = Depends(get_session)):
+async def list_meta_strategies(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
-        select(MetaStrategy).where(MetaStrategy.user_id == user_id).order_by(MetaStrategy.created_at.desc())
+        select(MetaStrategy).where(MetaStrategy.user_id == current_user.id).order_by(MetaStrategy.created_at.desc())
     )
-    return result.scalars().all()
+    return [_serialize_ms(ms) for ms in result.scalars().all()]
 
 
-@router.post("")
-async def create_meta_strategy(data: CreateMetaStrategyRequest, session: AsyncSession = Depends(get_session)):
+@router.post("", status_code=201)
+async def create_meta_strategy(
+    data: CreateMetaStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    if data.strategy_ids:
+        result = await session.execute(
+            select(Strategy.id).where(
+                Strategy.id.in_(data.strategy_ids), Strategy.user_id == current_user.id
+            )
+        )
+        owned = set(result.scalars().all())
+        if owned != set(data.strategy_ids):
+            raise HTTPException(status_code=400, detail="One or more strategies not found")
     ms = MetaStrategy(
-        user_id=data.user_id,
+        user_id=current_user.id,
         name=data.name,
         description=data.description,
         mode=data.mode,
@@ -149,24 +197,36 @@ async def create_meta_strategy(data: CreateMetaStrategyRequest, session: AsyncSe
     session.add(ms)
     await session.commit()
     await session.refresh(ms)
-    return ms
+    return _serialize_ms(ms)
 
 
 @router.get("/{ms_id}")
-async def get_meta_strategy(ms_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
-    return ms
+async def get_meta_strategy(
+    ms_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
+    return _serialize_ms(ms)
 
 
 @router.put("/{ms_id}")
-async def update_meta_strategy(ms_id: str, data: UpdateMetaStrategyRequest, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def update_meta_strategy(
+    ms_id: str,
+    data: UpdateMetaStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
+    if data.strategy_ids is not None:
+        result = await session.execute(
+            select(Strategy.id).where(
+                Strategy.id.in_(data.strategy_ids), Strategy.user_id == current_user.id
+            )
+        )
+        owned = set(result.scalars().all())
+        if owned != set(data.strategy_ids):
+            raise HTTPException(status_code=400, detail="One or more strategies not found")
     if data.name is not None:
         ms.name = data.name
     if data.description is not None:
@@ -189,28 +249,33 @@ async def update_meta_strategy(ms_id: str, data: UpdateMetaStrategyRequest, sess
         ms.current_winner_id = data.current_winner_id
     await session.commit()
     await session.refresh(ms)
-    return ms
+    return _serialize_ms(ms)
 
 
 @router.delete("/{ms_id}")
-async def delete_meta_strategy(ms_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def delete_meta_strategy(
+    ms_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
     await session.delete(ms)
     await session.commit()
     return {"status": "deleted"}
 
 
 @router.post("/{ms_id}/strategies")
-async def add_strategy_to_pool(ms_id: str, strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def add_strategy_to_pool(
+    ms_id: str,
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
 
-    strat_result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
+    strat_result = await session.execute(
+        select(Strategy).where(Strategy.id == strategy_id, Strategy.user_id == current_user.id)
+    )
     if not strat_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Strategy not found")
 
@@ -220,31 +285,33 @@ async def add_strategy_to_pool(ms_id: str, strategy_id: str, session: AsyncSessi
         ms.strategy_ids = ids
         await session.commit()
         await session.refresh(ms)
-    return ms
+    return _serialize_ms(ms)
 
 
 @router.delete("/{ms_id}/strategies/{strategy_id}")
-async def remove_strategy_from_pool(ms_id: str, strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
-
+async def remove_strategy_from_pool(
+    ms_id: str,
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
     ids = [s for s in ms.strategy_ids if s != strategy_id]
     ms.strategy_ids = ids
     if ms.current_winner_id == strategy_id:
         ms.current_winner_id = None
     await session.commit()
     await session.refresh(ms)
-    return ms
+    return _serialize_ms(ms)
 
 
 @router.get("/{ms_id}/rankings")
-async def get_rankings(ms_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def get_rankings(
+    ms_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
 
     weights = (ms.scoring_config or {}).get("metrics", None)
     strategy_scores = []
@@ -252,7 +319,7 @@ async def get_rankings(ms_id: str, session: AsyncSession = Depends(get_session))
         strat_result = await session.execute(select(Strategy).where(Strategy.id == sid))
         strat = strat_result.scalar_one_or_none()
         strat_name = strat.name if strat else sid
-        trades = await _fetch_trades(session, sid)
+        trades = await _fetch_trades(session, sid, current_user)
         score_result = _compute_default_score(trades, weights)
         strategy_scores.append({"id": sid, "name": strat_name, **score_result})
 
@@ -272,18 +339,19 @@ async def get_rankings(ms_id: str, session: AsyncSession = Depends(get_session))
 
 
 @router.post("/{ms_id}/evaluate")
-async def evaluate_promotion(ms_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def evaluate_promotion(
+    ms_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
 
     weights = (ms.scoring_config or {}).get("metrics", None)
     probation_hours = (ms.promotion_config or {}).get("probation_hours", 0)
 
     strategy_scores = []
     for sid in ms.strategy_ids:
-        trades = await _fetch_trades(session, sid)
+        trades = await _fetch_trades(session, sid, current_user)
         score_result = _compute_default_score(trades, weights)
         strategy_scores.append({"id": sid, **score_result})
 
@@ -299,7 +367,7 @@ async def evaluate_promotion(ms_id: str, session: AsyncSession = Depends(get_ses
             top_n = strategy_scores[:from_top]
             trade_signals = {}
             for sid_candidate in [s["id"] for s in top_n]:
-                sc_trades = await _fetch_trades(session, sid_candidate)
+                sc_trades = await _fetch_trades(session, sid_candidate, current_user)
                 latest_pnl = sc_trades[0]["pnl"] if sc_trades else 0
                 trade_signals[sid_candidate] = "buy" if latest_pnl > 0 else "sell"
 
@@ -345,26 +413,29 @@ async def evaluate_promotion(ms_id: str, session: AsyncSession = Depends(get_ses
 
 
 @router.post("/{ms_id}/force-promote")
-async def force_promote(ms_id: str, strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def force_promote(
+    ms_id: str,
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
     if strategy_id not in ms.strategy_ids:
         raise HTTPException(status_code=400, detail="Strategy not in meta-strategy pool")
     ms.current_winner_id = strategy_id
     ms.last_promotion_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(ms)
-    return ms
+    return _serialize_ms(ms)
 
 
 @router.get("/{ms_id}/performance")
-async def get_meta_strategy_performance(ms_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(MetaStrategy).where(MetaStrategy.id == ms_id))
-    ms = result.scalar_one_or_none()
-    if not ms:
-        raise HTTPException(status_code=404, detail="Meta-strategy not found")
+async def get_meta_strategy_performance(
+    ms_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ms = await _get_owned_ms(ms_id, current_user, session)
 
     total_pnl = 0.0
     total_trades = 0
@@ -376,7 +447,7 @@ async def get_meta_strategy_performance(ms_id: str, session: AsyncSession = Depe
         strat = strat_result.scalar_one_or_none()
         strat_name = strat.name if strat else sid
 
-        trades = await _fetch_trades(session, sid)
+        trades = await _fetch_trades(session, sid, current_user)
         strat_pnl = sum(t["pnl"] for t in trades)
         strat_count = len(trades)
         strat_winning = sum(1 for t in trades if t["pnl"] > 0)

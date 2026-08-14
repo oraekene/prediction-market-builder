@@ -102,8 +102,7 @@ def register_search_tools(tr: Any, orchestrator: SearchOrchestrator) -> None:
     )
 
 
-def _handle_search_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
-    import asyncio
+async def _handle_search_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
     depth_map = {"quick": SearchDepth.QUICK, "standard": SearchDepth.STANDARD, "deep": SearchDepth.DEEP}
     depth = depth_map.get(kw.get("depth", "standard"), SearchDepth.STANDARD)
     cat_str = kw.get("category", "general")
@@ -118,28 +117,24 @@ def _handle_search_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) ->
         categories=[cat],
         extract_content=depth in (SearchDepth.STANDARD, SearchDepth.DEEP),
     )
-    resp = asyncio.get_event_loop().run_until_complete(orchestrator.search(req))
+    resp = await orchestrator.search(req)
     return resp.model_dump()
 
 
-def _handle_news_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
-    import asyncio
+async def _handle_news_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
     req = SearchRequest(
         query=kw.get("query", ""),
         max_results=min(int(kw.get("max_results", 5)), 20),
         depth=SearchDepth.QUICK,
         categories=[SearchCategory.NEWS],
     )
-    resp = asyncio.get_event_loop().run_until_complete(orchestrator.search(req))
+    resp = await orchestrator.search(req)
     return resp.model_dump()
 
 
-def _handle_crawl_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
-    import asyncio
+async def _handle_crawl_tool(orchestrator: SearchOrchestrator, kw: dict[str, Any]) -> dict[str, Any]:
     url = kw.get("url", "")
     if not url:
         return {"error": "url is required"}
-    result = asyncio.get_event_loop().run_until_complete(
-        orchestrator.camoufox.extract_page_safe(url)
-    )
+    result = await orchestrator.camoufox.extract_page_safe(url)
     return result

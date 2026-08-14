@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
 from app.database import Base
-from app.models import User, Market, Strategy, Trade
+
+# Import every model module so Base.metadata is complete for autogenerate.
+from app import models  # noqa: F401
+import app.models.paper_wallet  # noqa: F401
+import app.models.monitored_position  # noqa: F401
+import app.models.safe_wallet  # noqa: F401
+import app.models.withdrawal_strategy  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

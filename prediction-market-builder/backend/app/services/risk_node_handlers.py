@@ -136,7 +136,7 @@ def handle_reject_action(node: dict, inputs: dict, ctx) -> dict[str, Any]:
 
 
 def handle_approve_action(node: dict, inputs: dict, ctx) -> dict[str, Any]:
-    return {"approved": True, "suggested_size": 0.0, "violations": ["rule_approved"]}
+    return {"approved": True, "suggested_size": 0.0, "violations": []}
 
 
 def handle_stop_loss(node: dict, inputs: dict, ctx) -> dict[str, Any]:

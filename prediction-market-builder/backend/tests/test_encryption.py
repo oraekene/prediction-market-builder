@@ -8,7 +8,12 @@ class TestEncryptionService:
         plaintext = "my-super-secret-api-key"
         ciphertext = svc.encrypt(plaintext)
         assert ciphertext != plaintext
+        assert ciphertext.startswith("v1:")
         assert svc.decrypt(ciphertext) == plaintext
+
+    def test_encrypt_is_nondeterministic(self):
+        svc = EncryptionService(key="test-secret-key-32-bytes-long!!")
+        assert svc.encrypt("secret") != svc.encrypt("secret")
 
     def test_different_keys_fail(self):
         svc1 = EncryptionService(key="first-key-here-32-bytes-long!!!")
@@ -22,8 +27,10 @@ class TestEncryptionService:
         assert svc.decrypt(svc.encrypt("")) == ""
 
     def test_no_key_raises(self):
-        svc = EncryptionService(key="")
-        if svc._fernet is not None:
-            pytest.skip("skipped when SECRET_KEY env is set (key falls back to settings)")
-        with pytest.raises(RuntimeError, match="not initialized"):
-            svc.encrypt("data")
+        with pytest.raises(ValueError, match="non-empty key"):
+            EncryptionService(key="")
+
+    def test_legacy_unversioned_ciphertext_rejected(self):
+        svc = EncryptionService(key="test-secret-key-32-bytes-long!!")
+        with pytest.raises(ValueError, match="Invalid ciphertext format"):
+            svc.decrypt("unversioned-token")

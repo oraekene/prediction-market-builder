@@ -1,39 +1,60 @@
 import base64
-import hashlib
 import logging
+import os
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-
-def _derive_key(secret: str) -> bytes:
-    return base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+_KDF_ITERATIONS = 600_000
+_VERSION_PREFIX = "v1"
 
 
 class EncryptionService:
+    """Encrypts secrets at rest.
+
+    Key derivation: PBKDF2-HMAC-SHA256 over ENCRYPTION_KEY with a random
+    16-byte salt per ciphertext, stored alongside the Fernet token as
+    ``v1:<salt_b64>:<token>``.
+    """
+
     def __init__(self, key: str | None = None):
-        raw = key or settings.secret_key
-        if not raw:
-            logger.warning("EncryptionService: no key provided — operations will fail")
-            self._fernet = None
-        else:
-            self._fernet = Fernet(_derive_key(raw))
+        secret = (key if key is not None else settings.encryption_key)
+        if not secret:
+            raise ValueError("EncryptionService requires a non-empty key (ENCRYPTION_KEY)")
+        self._secret = secret.encode()
+
+    def _fernet_for(self, salt: bytes) -> Fernet:
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=_KDF_ITERATIONS,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(self._secret))
+        return Fernet(key)
 
     def encrypt(self, plaintext: str) -> str:
-        if self._fernet is None:
-            raise RuntimeError("EncryptionService not initialized (no key)")
-        return self._fernet.encrypt(plaintext.encode()).decode()
+        salt = os.urandom(16)
+        token = self._fernet_for(salt).encrypt(plaintext.encode())
+        return f"{_VERSION_PREFIX}:{base64.urlsafe_b64encode(salt).decode()}:{token.decode()}"
 
     def decrypt(self, ciphertext: str) -> str:
-        if self._fernet is None:
-            raise RuntimeError("EncryptionService not initialized (no key)")
         try:
-            return self._fernet.decrypt(ciphertext.encode()).decode()
-        except InvalidToken:
-            raise ValueError("Invalid ciphertext or wrong key")
+            version, salt_b64, token = ciphertext.split(":", 2)
+        except ValueError as exc:
+            raise ValueError("Invalid ciphertext format") from exc
+        if version != _VERSION_PREFIX:
+            raise ValueError(f"Unsupported ciphertext version: {version!r}")
+        salt = base64.urlsafe_b64decode(salt_b64.encode())
+        try:
+            return self._fernet_for(salt).decrypt(token.encode()).decode()
+        except InvalidToken as exc:
+            raise ValueError("Invalid ciphertext or wrong key") from exc
 
 
 encryption_service = EncryptionService()

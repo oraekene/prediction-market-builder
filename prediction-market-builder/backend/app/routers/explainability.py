@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import get_session
 from app.models.experiment_result import ExperimentResult
+from app.models.research_session import ResearchSession
+from app.models.user import User
 from app.routers.auth import get_current_user
 from app.services.explainability_service import ExplainabilityService
 
@@ -30,16 +32,24 @@ def get_service() -> ExplainabilityService:
     return _explainability_service
 
 
+async def _get_owned_experiment(
+    result_id: str, user: User, db: AsyncSession
+) -> ExperimentResult | None:
+    result = await db.execute(
+        select(ExperimentResult)
+        .join(ResearchSession, ExperimentResult.session_id == ResearchSession.id)
+        .where(ExperimentResult.id == result_id, ResearchSession.user_id == user.id)
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("/{result_id}")
 async def get_explanation(
     result_id: str,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    async with async_session() as db:
-        result = await db.execute(
-            select(ExperimentResult).where(ExperimentResult.id == result_id)
-        )
-        experiment = result.scalar_one_or_none()
+    experiment = await _get_owned_experiment(result_id, user, db)
 
     if not experiment:
         raise HTTPException(status_code=404, detail="Experiment result not found")
@@ -53,15 +63,19 @@ async def get_explanation(
 @router.get("/session/{session_id}/aggregate")
 async def get_session_aggregate(
     session_id: str,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    async with async_session() as db:
-        result = await db.execute(
-            select(ExperimentResult)
-            .where(ExperimentResult.session_id == session_id)
-            .order_by(ExperimentResult.iteration.asc())
+    result = await db.execute(
+        select(ExperimentResult)
+        .join(ResearchSession, ExperimentResult.session_id == ResearchSession.id)
+        .where(
+            ExperimentResult.session_id == session_id,
+            ResearchSession.user_id == user.id,
         )
-        experiments = list(result.scalars().all())
+        .order_by(ExperimentResult.iteration.asc())
+    )
+    experiments = list(result.scalars().all())
 
     if not experiments:
         return {"aggregate": None, "count": 0}

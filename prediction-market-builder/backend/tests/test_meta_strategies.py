@@ -23,7 +23,7 @@ class TestMetaStrategyAPI:
             "description": "Test description",
             "mode": "competition",
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Test Meta"
         assert data["mode"] == "competition"
@@ -43,7 +43,7 @@ class TestMetaStrategyAPI:
             "promotion_config": {"interval": "weekly", "probation_hours": 72, "evaluation_window_days": 60},
             "confluence_config": {"threshold": 2, "source": "top_n", "from_top": 3, "manual_strategy_ids": []},
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert data["consumer"] == "paper_trading"
         assert data["scoring_config"]["metrics"]["sharpe"] == 0.5

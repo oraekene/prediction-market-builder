@@ -22,9 +22,16 @@ from app.services.backtester import SimulatedMarketHistory
 logger = logging.getLogger(__name__)
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class ResearchScheduler:
-    """
-    Manages the lifecycle of research sessions.
+    """Manages the lifecycle of research sessions.
 
     - Spawns/resumes sessions as asyncio background tasks
     - Enforces per-user and global concurrency limits
@@ -47,7 +54,7 @@ class ResearchScheduler:
         self.explainability = explainability
 
         self._sessions: dict[str, asyncio.Task] = {}
-        self._user_locks: dict[str, asyncio.Semaphore] = {}
+        self._session_owners: dict[str, str] = {}
         self._global_lock = asyncio.Semaphore(5)
         self._stop_events: dict[str, asyncio.Event] = {}
         self._broadcast: Callable | None = None
@@ -79,7 +86,14 @@ class ResearchScheduler:
             task.cancel()
             self._stop_events.pop(session_id, None)
         self._sessions.clear()
+        self._session_owners.clear()
         logger.info("ResearchScheduler stopped")
+
+    def _user_active_count(self, user_id: str) -> int:
+        return sum(
+            1 for sid, t in self._sessions.items()
+            if not t.done() and self._session_owners.get(sid) == user_id
+        )
 
     async def start_session(
         self,
@@ -94,13 +108,9 @@ class ResearchScheduler:
             return None
 
         user_config = await self._get_user_config(user_id)
-        user_sessions = sum(1 for s in self._sessions.values() if not s.done())
-        user_active = sum(
-            1 for sid, t in self._sessions.items()
-            if not t.done() and sid.startswith(user_id)
-        )
-        if user_active >= (user_config.max_concurrent if user_config else 2):
-            logger.warning("User %s at max concurrency", user_id)
+        max_concurrent = user_config.max_concurrent if user_config else 2
+        if self._user_active_count(user_id) >= max_concurrent:
+            logger.warning("User %s at max concurrency (%d)", user_id, max_concurrent)
             return None
 
         session = ResearchSession(
@@ -120,6 +130,7 @@ class ResearchScheduler:
         self._stop_events[session.id] = stop_event
         task = asyncio.create_task(self._run_session_loop(session.id, stop_event))
         self._sessions[session.id] = task
+        self._session_owners[session.id] = user_id
         logger.info("Session %s started for user %s", session.id, user_id)
         return session
 
@@ -128,6 +139,7 @@ class ResearchScheduler:
         if stop_event:
             stop_event.set()
         task = self._sessions.pop(session_id, None)
+        self._session_owners.pop(session_id, None)
         if task and not task.done():
             task.cancel()
             try:
@@ -142,6 +154,8 @@ class ResearchScheduler:
             if session:
                 session.status = SessionStatus.PAUSED
                 await db.commit()
+            else:
+                return False
         return True
 
     async def get_session(self, session_id: str) -> ResearchSession | None:
@@ -151,13 +165,13 @@ class ResearchScheduler:
             )
             return result.scalar_one_or_none()
 
-    async def get_user_sessions(self, user_id: str) -> list[ResearchSession]:
+    async def get_user_sessions(self, user_id: str, limit: int = 20) -> list[ResearchSession]:
         async with async_session() as db:
             result = await db.execute(
                 select(ResearchSession)
                 .where(ResearchSession.user_id == user_id)
                 .order_by(ResearchSession.created_at.desc())
-                .limit(20)
+                .limit(limit)
             )
             return list(result.scalars().all())
 
@@ -171,69 +185,70 @@ class ResearchScheduler:
             return list(result.scalars().all())
 
     async def _run_session_loop(self, session_id: str, stop_event: asyncio.Event) -> None:
-        async with self._global_lock:
-            try:
-                async with async_session() as db:
-                    result = await db.execute(
-                        select(ResearchSession).where(ResearchSession.id == session_id)
-                    )
-                    session = result.scalar_one_or_none()
-                    if not session:
-                        return
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(ResearchSession).where(ResearchSession.id == session_id)
+                )
+                session = result.scalar_one_or_none()
+                if not session:
+                    return
 
-                    config = await self._get_user_config(session.user_id)
-                    max_hypotheses = config.max_hypotheses_per_session if config else 50
+                config = await self._get_user_config(session.user_id)
+                max_hypotheses = config.max_hypotheses_per_session if config else 50
 
-                    while not stop_event.is_set() and session.current_iteration < max_hypotheses:
-                        try:
+                while not stop_event.is_set() and session.current_iteration < max_hypotheses:
+                    try:
+                        async with self._global_lock:
                             await self._run_single_iteration(session, db)
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as exc:
-                            logger.exception("Iteration failed for session %s: %s", session_id, exc)
-                            session.error_message = str(exc)[:500]
-                            await db.commit()
-                            if stop_event.is_set():
-                                break
-                            await asyncio.sleep(5)
-
-                        if mode_is_manual(session.mode):
-                            break
-
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.exception("Iteration failed for session %s: %s", session_id, exc)
+                        session.error_message = str(exc)[:500]
+                        await db.commit()
                         if stop_event.is_set():
                             break
-                        cooldown = 30 if session.mode == SessionMode.CONTINUOUS else 3600
-                        await self._wait_until(stop_event, cooldown)
+                        await asyncio.sleep(5)
 
-                    if session.current_iteration >= max_hypotheses:
-                        session.status = SessionStatus.COMPLETED
-                    elif stop_event.is_set():
-                        session.status = SessionStatus.PAUSED
+                    if mode_is_manual(session.mode):
+                        break
+
+                    if stop_event.is_set():
+                        break
+                    cooldown = 30 if session.mode == SessionMode.CONTINUOUS else 3600
+                    await self._wait_until(stop_event, cooldown)
+
+                if session.current_iteration >= max_hypotheses:
+                    session.status = SessionStatus.COMPLETED
+                elif stop_event.is_set():
+                    session.status = SessionStatus.PAUSED
+                await db.commit()
+
+        except asyncio.CancelledError:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(ResearchSession).where(ResearchSession.id == session_id)
+                )
+                session = result.scalar_one_or_none()
+                if session:
+                    session.status = SessionStatus.PAUSED
                     await db.commit()
-
-            except asyncio.CancelledError:
-                async with async_session() as db:
-                    result = await db.execute(
-                        select(ResearchSession).where(ResearchSession.id == session_id)
-                    )
-                    session = result.scalar_one_or_none()
-                    if session:
-                        session.status = SessionStatus.PAUSED
-                        await db.commit()
-                raise
-            finally:
-                self._sessions.pop(session_id, None)
-                self._stop_events.pop(session_id, None)
+            raise
+        finally:
+            self._sessions.pop(session_id, None)
+            self._session_owners.pop(session_id, None)
+            self._stop_events.pop(session_id, None)
 
     async def _run_single_iteration(self, session: ResearchSession, db: AsyncSession) -> None:
         climate = await self.market_regime.assess_climate([])
 
+        import pandas as pd
         tabpfn_feature_columns = [
             "odds", "volume", "liquidity", "spread",
             "participants", "hypothesis_threshold",
             "volatility", "autocorrelation",
         ]
-        import pandas as pd
         dummy_features = pd.DataFrame(
             [[0.5, 0.5, 0.5, 0.05, 0.5, 0.5, 0.5, 0.0]],
             columns=tabpfn_feature_columns,
@@ -271,7 +286,6 @@ class ResearchScheduler:
         if result_dict.get("verdict") == "COMPLETED":
             session.current_iteration += 1
             session.status = SessionStatus.COMPLETED
-            session.pareto_front = result_dict.get("ga_pareto_front") or result_dict.get("pareto_front")
             await db.commit()
             return
 
@@ -306,7 +320,6 @@ class ResearchScheduler:
             composite_score=result_dict.get("composite_score", 0.0),
             shap_explanation=shap_explanation,
             verdict=result_dict.get("verdict", "REVERTED"),
-            git_commit_hash=result_dict.get("git_commit_hash"),
         )
         db.add(experiment)
 
@@ -393,6 +406,7 @@ class ResearchScheduler:
             self._stop_events[session.id] = stop_event
             task = asyncio.create_task(self._run_session_loop(session.id, stop_event))
             self._sessions[session.id] = task
+            self._session_owners[session.id] = session.user_id
 
     async def _cron_worker(self) -> None:
         while self._running:
@@ -408,22 +422,25 @@ class ResearchScheduler:
                 for cfg in configs:
                     if len(self._sessions) >= 5:
                         break
-                    user_active = sum(
-                        1 for sid, t in self._sessions.items()
-                        if not t.done() and sid.startswith(cfg.user_id)
-                    )
-                    if user_active >= cfg.max_concurrent:
+                    if self._user_active_count(cfg.user_id) >= cfg.max_concurrent:
                         continue
                     async with async_session() as db:
                         last_result = await db.execute(
                             select(ExperimentResult)
+                            .where(ExperimentResult.session_id.in_(
+                                select(ResearchSession.id).where(
+                                    ResearchSession.user_id == cfg.user_id
+                                )
+                            ))
                             .order_by(ExperimentResult.created_at.desc())
                             .limit(1)
                         )
                         last = last_result.scalar_one_or_none()
-                        if last:
-                            elapsed = (datetime.now(timezone.utc) - last.created_at).total_seconds() / 60
-                            if elapsed < cfg.cron_interval_minutes:
+                        if last and last.created_at is not None:
+                            elapsed = (
+                                datetime.now(timezone.utc) - _as_utc(last.created_at)
+                            ).total_seconds() / 60
+                            if elapsed < (cfg.cron_interval_minutes or 3600):
                                 continue
                     await self.start_session(
                         user_id=cfg.user_id,
@@ -433,7 +450,7 @@ class ResearchScheduler:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.error("Cron worker error: %s", exc)
+                logger.exception("Cron worker error: %s", exc)
 
     async def _wait_until(self, stop_event: asyncio.Event, timeout: int) -> None:
         try:

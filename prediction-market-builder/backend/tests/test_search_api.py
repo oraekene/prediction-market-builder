@@ -176,26 +176,29 @@ class TestToolRegistration:
         assert "query" in params["required"]
         assert params["properties"]["depth"]["enum"] == ["quick", "standard", "deep"]
 
-    def test_search_web_dispatch(self):
+    @pytest.mark.asyncio
+    async def test_search_web_dispatch(self):
         tr = ToolRegistry()
         mock_orch = MagicMock()
         mock_orch.search = AsyncMock(return_value=_make_search_response())
         register_search_tools(tr, mock_orch)
 
-        result = tr.dispatch("search_web", {"query": "test", "depth": "quick"})
+        result = await tr.execute("search_web", {"query": "test", "depth": "quick"})
         assert "results" in result
         assert result["total_found"] == 2
 
-    def test_search_news_dispatch(self):
+    @pytest.mark.asyncio
+    async def test_search_news_dispatch(self):
         tr = ToolRegistry()
         mock_orch = MagicMock()
         mock_orch.search = AsyncMock(return_value=_make_search_response())
         register_search_tools(tr, mock_orch)
 
-        result = tr.dispatch("search_news", {"query": "latest news"})
+        result = await tr.execute("search_news", {"query": "latest news"})
         assert "results" in result
 
-    def test_search_crawl_dispatch(self):
+    @pytest.mark.asyncio
+    async def test_search_crawl_dispatch(self):
         tr = ToolRegistry()
         mock_orch = MagicMock()
         mock_orch.camoufox = MagicMock()
@@ -205,12 +208,13 @@ class TestToolRegistration:
         })
         register_search_tools(tr, mock_orch)
 
-        result = tr.dispatch("search_crawl", {"url": "https://example.com"})
+        result = await tr.execute("search_crawl", {"url": "https://example.com"})
         assert result["url"] == "https://example.com"
 
-    def test_search_crawl_missing_url(self):
+    @pytest.mark.asyncio
+    async def test_search_crawl_missing_url(self):
         tr = ToolRegistry()
         register_search_tools(tr, MagicMock())
 
-        result = tr.dispatch("search_crawl", {})
+        result = await tr.execute("search_crawl", {})
         assert "error" in result

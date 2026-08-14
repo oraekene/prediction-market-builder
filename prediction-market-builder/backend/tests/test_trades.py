@@ -54,7 +54,7 @@ async def test_create_trade_approved(authenticated_client):
         "market": {"current_odds": 0.55, "platform_market_id": "mkt-1", "platform": "polymarket"},
         "risk_profile": {"min_confidence": 0.5},
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
     assert body["approved"] is True
     assert body["trade"] is not None
@@ -71,7 +71,7 @@ async def test_create_trade_rejected(authenticated_client):
         "market": {"current_odds": 0.55, "platform_market_id": "mkt-1", "platform": "polymarket"},
         "risk_profile": {"max_drawdown": 0.1},
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
     assert body["approved"] is False
     assert body["trade"] is None

@@ -15,6 +15,24 @@ router = APIRouter(prefix="/api/withdrawal", tags=["withdrawal"])
 safe_wallet_service = SafeWalletService()
 
 
+def _validate_steps(steps: list) -> None:
+    if not isinstance(steps, list):
+        raise HTTPException(status_code=400, detail="steps must be a list")
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise HTTPException(status_code=400, detail=f"step {i} must be an object")
+        action = step.get("action", {})
+        atype = action.get("type", "")
+        if atype in ("withdraw_pct", "convert_to_stablecoin") and "pct" in action:
+            pct = action["pct"]
+            if not isinstance(pct, (int, float)) or pct < 0 or pct > 100:
+                raise HTTPException(status_code=400, detail=f"step {i}: pct must be between 0 and 100")
+        if atype in ("withdraw_fixed", "convert_to_stablecoin") and "amount" in action:
+            amount = action["amount"]
+            if not isinstance(amount, (int, float)) or amount < 0:
+                raise HTTPException(status_code=400, detail=f"step {i}: amount must be non-negative")
+
+
 class CreateWalletRequest(BaseModel):
     name: str
     currency: str = "USDC"
@@ -128,6 +146,11 @@ async def manual_transfer(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    # Internal ledger entry. There is no payout path consuming this balance
+    # today; if one is added, transfers must be derived from verified
+    # exchange/on-chain balances instead of client-asserted amounts.
+    if data.amount > 1_000_000:
+        raise HTTPException(status_code=400, detail="Transfer amount exceeds cap")
     result = await safe_wallet_service.transfer_to_safe_wallet(
         user_id=current_user.id,
         amount=data.amount,
@@ -152,12 +175,13 @@ async def get_withdrawal_history(
     )
 
 
-@router.post("/strategies")
+@router.post("/strategies", status_code=201)
 async def create_withdrawal_strategy(
     data: CreateStrategyRequest,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    _validate_steps(data.steps)
     strategy = WithdrawalStrategy(
         user_id=current_user.id,
         name=data.name,
@@ -252,6 +276,7 @@ async def update_withdrawal_strategy(
     if data.description is not None:
         strategy.description = data.description
     if data.steps is not None:
+        _validate_steps(data.steps)
         strategy.steps = data.steps
     if data.is_active is not None:
         strategy.is_active = data.is_active

@@ -114,7 +114,7 @@ async def test_approve_action_overrides_reject():
         portfolio={"current_capital": 8000, "peak_capital": 10000}
     )
     assert result["approved"] is True
-    assert "rule_approved" in result["violations"]
+    assert result["violations"] == []
 
 
 @pytest.mark.asyncio

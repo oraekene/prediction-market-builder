@@ -9,6 +9,7 @@ class RLMAlphaVector(Base):
     __tablename__ = "rlm_alpha_vectors"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     source_type: Mapped[str] = mapped_column(String, nullable=False)
     source_path: Mapped[str] = mapped_column(Text, nullable=True)
     source_hash: Mapped[str] = mapped_column(String, nullable=True, index=True)

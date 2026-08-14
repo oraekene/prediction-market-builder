@@ -51,7 +51,7 @@ async def test_xss_in_strategy_name(authenticated_client):
     resp = await authenticated_client.post("/api/strategies", json={
         "name": "<script>alert('XSS')</script>",
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert "<script>" in data["name"]
 
@@ -101,7 +101,7 @@ async def test_weak_password_registration(client, session):
         resp = await ac.post("/api/auth/register", json={
             "email": "weak@test.com", "password": "ab",
         })
-        assert resp.status_code in (200, 400, 422)
+        assert resp.status_code == 400
     app.dependency_overrides.clear()
 
 

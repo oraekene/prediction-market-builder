@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from app.services.backtester import Backtester, BacktestResult
+from app.services.backtester import BacktestResult
 from app.ai.tabpfn_service import TabPFNService
 from app.ai.pi_autoresearch.nsgaii import nsga2_optimize
 from app.ai.pi_autoresearch.monte_carlo import monte_carlo_backtest
@@ -87,33 +87,47 @@ class AutoresearchService:
                 "pareto_front": [],
             }
 
-        best = surviving[0]
-        mc_result = await monte_carlo_backtest(
-            {"threshold": best["threshold"], "operator": best["operator"], "side": "yes"},
-            market_history,
-            n=50,
-        )
+        evaluated: list[dict[str, Any]] = []
+        for h in surviving:
+            mc_result = await monte_carlo_backtest(
+                {"threshold": h["threshold"], "operator": h["operator"], "side": "yes"},
+                market_history,
+                n=50,
+            )
+            tabpfn_result = await self.tabpfn.validate_signal(
+                market_data=market_snapshot,
+                regime_vector=[climate.get("metrics", {}).get("volatility", 0.5)],
+            )
+            objectives = [
+                mc_result.mean_sharpe,
+                mc_result.mean_win_rate,
+                -abs(mc_result.var_95),
+                tabpfn_result.get("probability", 0.5),
+            ]
+            evaluated.append({
+                "hypothesis": h,
+                "mc_result": mc_result,
+                "tabpfn_result": tabpfn_result,
+                "objectives": objectives,
+            })
 
-        tabpfn_features = self._build_feature_vector(market_snapshot, climate, best)
-        tabpfn_result = await self.tabpfn.validate_signal(
-            market_data=market_snapshot,
-            regime_vector=[climate.get("metrics", {}).get("volatility", 0.5)],
-        )
-
-        objectives = [
-            mc_result.mean_sharpe,
-            mc_result.mean_win_rate,
-            -abs(mc_result.var_95),
-            tabpfn_result.get("probability", 0.5),
-        ]
         ranked = nsga2_optimize(
-            [{"hypothesis": best, "threshold": best["threshold"], "operator": best["operator"]}],
-            [objectives],
+            [e["hypothesis"] for e in evaluated],
+            [e["objectives"] for e in evaluated],
         )
+
+        best_eval = evaluated[0]
+        best = best_eval["hypothesis"]
+        mc_result = best_eval["mc_result"]
+        tabpfn_result = best_eval["tabpfn_result"]
 
         pareto_rank = ranked[0].rank if ranked else 0
-        composite_score = float(np.mean([abs(o) for o in objectives]))
+        composite_score = self._compute_composite_score(
+            mc_result, mc_result.mean_sharpe, tabpfn_result, preset=preset
+        )
         verdict = self._determine_verdict(composite_score, pareto_rank)
+
+        tabpfn_features = self._build_feature_vector(market_snapshot, climate, best)
 
         git_commit_hash = None
         if verdict == "KEPT" and self.experiment_tracker and session_id:
@@ -162,6 +176,15 @@ class AutoresearchService:
             "mc_var_95": round(mc_result.var_95, 4),
             "mc_cvar_95": round(mc_result.cvar_95, 4),
             "pareto_rank": pareto_rank,
+            "pareto_front": [
+                {
+                    "hypothesis": e["hypothesis"].get("description", "unknown"),
+                    "threshold": e["hypothesis"].get("threshold"),
+                    "operator": e["hypothesis"].get("operator"),
+                    "pareto_rank": ranked[i].rank if i < len(ranked) else None,
+                }
+                for i, e in enumerate(evaluated)
+            ],
             "hermes_critique": hermes_critique,
         }
 
@@ -180,11 +203,14 @@ class AutoresearchService:
 
         kept_count = len([r for r in (past_results or []) if r.get("verdict") == "KEPT"])
         if enable_genetic and kept_count >= 2 and top_feature_names:
-            return evolve_population(
-                past_results=past_results or [],
-                top_features=top_feature_names,
-                pop_size=n,
-            )
+            try:
+                return evolve_population(
+                    past_results=past_results or [],
+                    top_features=top_feature_names,
+                    pop_size=n,
+                )
+            except Exception as exc:
+                logger.warning("Genetic evolution failed, falling back to templates: %s", exc)
 
         matched_templates = [
             t for t in HYPOTHESIS_TEMPLATES
@@ -200,6 +226,8 @@ class AutoresearchService:
             threshold = round(random.uniform(lo, hi), 3)
             hypotheses.append({
                 "description": t["template"].format(feature=top_feature_names[0] if top_feature_names else "odds"),
+                "template": t["template"],
+                "feature": top_feature_names[0] if top_feature_names else "odds",
                 "operator": t["params"]["operator"],
                 "threshold": threshold,
                 "regime_affinity": t["regime_affinity"],
@@ -216,6 +244,8 @@ class AutoresearchService:
                 for h in hermes_hypotheses:
                     hypotheses.append({
                         "description": h,
+                        "template": "Hermes proposal: {feature}",
+                        "feature": top_feature_names[0] if top_feature_names else "odds",
                         "operator": random.choice(["gt", "lt"]),
                         "threshold": round(random.uniform(0.4, 0.7), 3),
                         "regime_affinity": [regime],
@@ -264,43 +294,34 @@ class AutoresearchService:
 
     def _compute_composite_score(
         self,
-        backtest_result: BacktestResult,
+        backtest_result: Any,
+        sharpe: float,
         tabpfn_result: dict[str, Any],
         preset: str = "sharpe_max",
     ) -> float:
-        win_rate = backtest_result.win_rate
-        sharpe = self._sharpe_approximation(backtest_result)
-        tabpfn_prob = tabpfn_result.get("probability", 0.5)
-        if preset == "sharpe_max":
-            return 0.7 * sharpe + 0.3 * tabpfn_prob
-        elif preset == "win_rate_max":
-            return 0.7 * win_rate + 0.3 * tabpfn_prob
-        elif preset == "risk_adjusted":
-            max_dd = 0.15
-            dd_penalty = 1.0 - max_dd
-            return 0.4 * sharpe + 0.3 * dd_penalty + 0.3 * tabpfn_prob
-        return 0.7 * sharpe + 0.3 * tabpfn_prob
+        """Blend backtest quality, Sharpe and TabPFN confidence into one score.
 
-    def _sharpe_approximation(self, result: BacktestResult) -> float:
-        if result.total_trades < 2:
-            return 0.0
-        returns = []
-        for t in result.trades:
-            if t.get("type") == "exit":
-                pnl = t.get("pnl", 0)
-                entry_price = t.get("entry_price", 0.5)
-                if entry_price > 0:
-                    returns.append(pnl / (entry_price * 1000))
-        if not returns:
-            return 0.0
-        mean_r = np.mean(returns)
-        std_r = np.std(returns) + 1e-8
-        return float(mean_r / std_r * np.sqrt(252))
+        Accepts either a BacktestResult (win_rate/total_pnl) or an MC result
+        object exposing mean_win_rate / mean_total_pnl.
+        """
+        if hasattr(backtest_result, "win_rate"):
+            win_rate = backtest_result.win_rate
+        elif hasattr(backtest_result, "mean_win_rate"):
+            win_rate = backtest_result.mean_win_rate
+        else:
+            win_rate = 0.0
+        normalized_sharpe = float(np.clip(sharpe / 2.0, 0.0, 1.0))
+        tabpfn_prob = tabpfn_result.get("probability", 0.5)
+        if preset == "win_rate_max":
+            return 0.7 * win_rate + 0.3 * tabpfn_prob
+        if preset == "risk_adjusted":
+            return 0.5 * normalized_sharpe + 0.2 * win_rate + 0.3 * tabpfn_prob
+        return 0.6 * normalized_sharpe + 0.1 * win_rate + 0.3 * tabpfn_prob
 
     def _determine_verdict(self, score: float, pareto_rank: int = 0) -> str:
-        if pareto_rank == 0 and score >= 1.0:
+        if pareto_rank == 0 and score >= 0.6:
             return "KEPT"
-        elif pareto_rank <= 1 and score >= 0.6:
+        if pareto_rank <= 1 and score >= 0.45:
             return "WARN"
         return "REVERTED"
 

@@ -12,9 +12,17 @@ router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
 service = PaperTradingService()
 
 
+async def _get_owned_wallet(user: User, session: AsyncSession) -> PaperWallet:
+    wallet = await service.get_or_create_wallet(user.id, session)
+    return wallet
+
+
 @router.get("/wallet")
-async def get_wallet(user_id: str = "default", session: AsyncSession = Depends(get_session)):
-    wallet = await service.get_or_create_wallet(user_id, session)
+async def get_wallet(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    wallet = await _get_owned_wallet(current_user, session)
 
     open_orders = await session.execute(
         select(PaperOrder).where(
@@ -35,7 +43,6 @@ async def get_wallet(user_id: str = "default", session: AsyncSession = Depends(g
 
     return {
         "id": wallet.id,
-        "user_id": wallet.user_id,
         "initial_balance": wallet.initial_balance,
         "current_balance": wallet.current_balance,
         "pnl": round(pnl, 2),
@@ -80,8 +87,11 @@ async def get_wallet(user_id: str = "default", session: AsyncSession = Depends(g
 
 
 @router.post("/wallet/reset")
-async def reset_wallet(user_id: str = "default", session: AsyncSession = Depends(get_session)):
-    wallet = await service.get_or_create_wallet(user_id, session)
+async def reset_wallet(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    wallet = await _get_owned_wallet(current_user, session)
     wallet = await service.reset_wallet(wallet.id, session)
     return {
         "success": True,
@@ -100,7 +110,15 @@ async def place_order(
     if not wallet_id:
         raise HTTPException(status_code=400, detail="wallet_id required")
 
+    wallet_result = await session.execute(
+        select(PaperWallet).where(PaperWallet.id == wallet_id, PaperWallet.user_id == current_user.id)
+    )
+    if not wallet_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
     mode = body.get("mode", "paper")
+    if mode not in ("paper", "live"):
+        raise HTTPException(status_code=400, detail="mode must be 'paper' or 'live'")
     user = current_user if mode == "live" else None
 
     result = await service.place_paper_order(
@@ -157,15 +175,17 @@ async def set_trading_mode(
 @router.get("/orders")
 async def list_orders(
     status: str | None = Query(None),
-    wallet_id: str | None = Query(None),
     limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(PaperOrder).order_by(PaperOrder.created_at.desc()).limit(limit)
+    wallet = await _get_owned_wallet(current_user, session)
+    query = select(PaperOrder).where(PaperOrder.wallet_id == wallet.id).order_by(PaperOrder.created_at.desc()).limit(limit)
     if status:
-        query = query.where(PaperOrder.status == OrderStatus(status))
-    if wallet_id:
-        query = query.where(PaperOrder.wallet_id == wallet_id)
+        try:
+            query = query.where(PaperOrder.status == OrderStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
     rows = await session.execute(query)
     orders = []
@@ -194,7 +214,20 @@ async def list_orders(
 
 
 @router.delete("/orders/{order_id}")
-async def cancel_order(order_id: str, session: AsyncSession = Depends(get_session)):
+async def cancel_order(
+    order_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(PaperOrder).join(PaperWallet, PaperOrder.wallet_id == PaperWallet.id).where(
+            PaperOrder.id == order_id,
+            PaperWallet.user_id == current_user.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
     cancelled = await service.cancel_order(order_id, session)
     if not cancelled:
         raise HTTPException(status_code=400, detail="Order cannot be cancelled or not found")
@@ -204,29 +237,44 @@ async def cancel_order(order_id: str, session: AsyncSession = Depends(get_sessio
 @router.get("/performance")
 async def get_performance(
     strategy_id: str | None = Query(None),
-    user_id: str = Query("default"),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    wallet = await service.get_or_create_wallet(user_id, session)
+    wallet = await _get_owned_wallet(current_user, session)
     perf = await service.get_performance(session=session, wallet_id=wallet.id, strategy_id=strategy_id)
     return perf
 
 
 @router.post("/sync-resolutions")
-async def sync_resolutions(body: dict, session: AsyncSession = Depends(get_session)):
+async def sync_resolutions(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     resolutions = body.get("resolutions", [])
-    result = await service.sync_resolutions(resolutions, session)
+    if not isinstance(resolutions, list):
+        raise HTTPException(status_code=400, detail="resolutions must be a list")
+    wallet = await _get_owned_wallet(current_user, session)
+    owned = await session.execute(
+        select(PaperOrder.market_id, PaperOrder.platform).where(PaperOrder.wallet_id == wallet.id)
+    )
+    owned_pairs = {(r.market_id, r.platform) for r in owned.all()}
+    filtered = [
+        r for r in resolutions
+        if isinstance(r, dict) and (r.get("market_id"), r.get("platform")) in owned_pairs
+    ]
+    result = await service.sync_resolutions(filtered, session)
     return result
 
 
 @router.get("/metrics/{metric}")
 async def get_metric(
     metric: str,
-    user_id: str = Query("default"),
     window: int = Query(0, ge=0, le=5000),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    wallet = await service.get_or_create_wallet(user_id, session)
+    wallet = await _get_owned_wallet(current_user, session)
     result = await service.get_metric(metric, session=session, wallet_id=wallet.id, window=window)
     return result
 
@@ -234,12 +282,18 @@ async def get_metric(
 @router.get("/compare")
 async def compare_strategies(
     strategy_ids: str = Query(..., description="Comma-separated strategy IDs"),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.models.strategy import Strategy
     ids = [s.strip() for s in strategy_ids.split(",") if s.strip()]
     if not ids:
         raise HTTPException(status_code=400, detail="At least one strategy_id required")
-    comparisons = await service.compare_strategies(ids, session)
+    result = await session.execute(
+        select(Strategy.id).where(Strategy.id.in_(ids), Strategy.user_id == current_user.id)
+    )
+    owned_ids = [r for r in result.scalars().all()]
+    comparisons = await service.compare_strategies(owned_ids, session)
     return {"comparisons": comparisons}
 
 
@@ -253,16 +307,17 @@ async def confirm_live(
 
 @router.post("/kill-switch")
 async def kill_switch(
-    user_id: str = "default",
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await service.kill_switch(session, user_id)
+    result = await service.kill_switch(session, current_user.id)
     return result
 
 
 @router.get("/connection-test")
 async def connection_test(
     platform: str = "polymarket",
+    current_user: User = Depends(get_current_user),
 ):
     ok = await service.live_connection_ok(platform)
     return {"platform": platform, "available": ok}

@@ -4,6 +4,7 @@ import ast
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,12 @@ from app.data.chromadb_manager import ChromaDBManager
 from app.services.node_executor import NodeRegistry, ExecutionContext
 
 logger = logging.getLogger(__name__)
+
+_FORBIDDEN_NAMES = {
+    "__import__", "open", "eval", "exec", "compile", "input",
+    "globals", "locals", "vars", "breakpoint", "memoryview",
+    "__loader__", "__spec__", "__build_class__", "super",
+}
 
 SKILL_TEMPLATE = """
 from typing import Any
@@ -144,6 +151,14 @@ class SkillCreator:
 
     def _register_in_tool_registry(self, compiled: dict[str, Any], code: str) -> None:
         try:
+            handler_fn = self.node_registry.get(compiled["id"])
+
+            def skill_handler(**kw: Any) -> dict[str, Any]:
+                node_data = kw.get("node_data") or {}
+                inputs = kw.get("inputs") or {}
+                result = handler_fn({"data": node_data}, inputs, ExecutionContext())
+                return result if isinstance(result, dict) else {"result": result}
+
             schema = {
                 "description": compiled.get("description", "Custom skill"),
                 "parameters": {
@@ -158,7 +173,7 @@ class SkillCreator:
                 name=compiled["id"],
                 toolset="custom_skills",
                 schema=schema,
-                handler=lambda **kw: {"result": "skill_executed", "skill_id": compiled["id"]},
+                handler=skill_handler,
             )
         except Exception as exc:
             logger.warning("Tool registry registration failed: %s", exc)
@@ -281,12 +296,21 @@ class SkillCreator:
 
         has_handler = False
         for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.ImportFrom) and node.module == "typing":
+                    continue
+                return False, "imports are not allowed in generated skills"
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                return False, "global/nonlocal statements are not allowed"
+            if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+                return False, f"dunder attribute access is not allowed: {node.attr}"
+            if isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
+                return False, f"forbidden name: {node.id}"
             if isinstance(node, ast.FunctionDef) and node.name == "handler":
                 has_handler = True
                 args = [arg.arg for arg in node.args.args]
                 if len(args) < 3:
                     return False, "handler must have at least 3 parameters (node, inputs, ctx)"
-                break
 
         if not has_handler:
             return False, "No 'handler' function found in generated code"
@@ -313,14 +337,57 @@ class SkillCreator:
         return None
 
     def _compile_and_register(self, code: str, description: str) -> dict[str, Any] | None:
+        """Compile generated code in a RestrictedPython sandbox and register it.
+
+        Generated code is LLM output and must be treated as untrusted: it runs
+        with RestrictedPython's safe builtins only (no ``__builtins__``, no
+        imports, guarded attribute access), inside the API process. The
+        containerized path (``build_container=True``) additionally executes it
+        with ``--network=none --read-only`` isolation.
+        """
+        from RestrictedPython import compile_restricted_exec
+        from RestrictedPython.Guards import (
+            safer_getattr,
+            guarded_unpack_sequence,
+            guarded_iter_unpack_sequence,
+            full_write_guard,
+            safe_builtins,
+        )
+
+        code = re.sub(r"^\s*from typing import .*$", "", code, flags=re.MULTILINE)
+
+        safe_globals: dict[str, Any] = {
+            "__builtins__": safe_builtins,
+            "_getattr_": safer_getattr,
+            "_getitem_": lambda obj, key: obj[key],
+            "_getiter_": lambda obj: iter(obj),
+            "_unpack_sequence_": guarded_unpack_sequence,
+            "_iter_unpack_sequence_": guarded_iter_unpack_sequence,
+            "_write_": full_write_guard,
+            "ExecutionContext": ExecutionContext,
+            "Any": Any,
+        }
+
         local_ns: dict[str, Any] = {}
         try:
-            exec(code, {"Any": Any, "ExecutionContext": ExecutionContext, "__builtins__": __builtins__}, local_ns)
+            byte_code = compile_restricted_exec(
+                code, filename=f"<skill_{description[:16]}>"
+            )
+            exec(byte_code, safe_globals, local_ns)
             handler_fn = local_ns.get("handler")
             if not handler_fn:
                 return None
         except Exception as exc:
-            logger.warning("Skill exec failed: %s", exc)
+            logger.warning("Skill restricted-exec failed: %s", exc)
+            return None
+
+        try:
+            smoke = handler_fn({"data": {}}, {}, ExecutionContext())
+            if not isinstance(smoke, dict):
+                logger.warning("Skill smoke test returned non-dict: %r", type(smoke))
+                return None
+        except Exception as exc:
+            logger.warning("Skill smoke test raised: %s", exc)
             return None
 
         skill_id = f"skill_{uuid.uuid4().hex[:8]}"

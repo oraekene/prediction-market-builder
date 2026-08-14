@@ -10,7 +10,6 @@ from app.models.trade import Trade, TradeStatus
 from app.services.execution import SimulatedExecutionEngine, ExecutionEngine
 from app.services.portfolio_manager import PortfolioManager
 from app.services.risk_manager import RiskManager, RiskProfile
-from app.data.duckdb_manager import DuckDBManager
 
 
 class PaperTradingService:
@@ -34,7 +33,9 @@ class PaperTradingService:
     async def _compute_session_loss(self, session: AsyncSession, user_id: str) -> float:
         result = await session.execute(
             select(func.coalesce(func.sum(PaperOrder.pnl), 0)).where(
-                PaperOrder.platform_order_id.isnot(None),
+                PaperOrder.wallet_id.in_(
+                    select(PaperWallet.id).where(PaperWallet.user_id == user_id)
+                ),
                 PaperOrder.pnl.isnot(None),
                 PaperOrder.pnl < 0,
             )
@@ -51,6 +52,9 @@ class PaperTradingService:
         wallet = await self.get_or_create_wallet(user_id, session)
         if not wallet:
             return {"cancelled": 0, "status": "wallet_not_found"}
+        from app.models.user import User
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
         rows = await session.execute(
             select(PaperOrder).where(
                 PaperOrder.wallet_id == wallet.id,
@@ -61,7 +65,9 @@ class PaperTradingService:
         for order in orders:
             if order.platform_order_id:
                 try:
-                    await self.live_engine.cancel_order(order.platform, order.platform_order_id)
+                    await self.live_engine.cancel_order(
+                        order.platform, order.platform_order_id, user
+                    )
                 except Exception:
                     pass
             order.status = OrderStatus.CANCELLED
@@ -112,6 +118,13 @@ class PaperTradingService:
         mode: str = "paper",
         user=None,
     ) -> dict[str, Any]:
+        if not math.isfinite(float(amount)) or amount <= 0:
+            return {"success": False, "error": "amount must be a positive finite number"}
+        if not math.isfinite(float(price)) or not (0 < price < 1):
+            return {"success": False, "error": "price must be between 0 and 1"}
+        if side not in ("buy", "sell"):
+            return {"success": False, "error": "side must be 'buy' or 'sell'"}
+
         wallet_result = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
         wallet = wallet_result.scalar_one_or_none()
         if not wallet:
@@ -202,13 +215,15 @@ class PaperTradingService:
         )
 
         if fill_data["filled"] and mode == "paper":
-            cost = fill_data["filled_amount"] * fill_data["fill_price"]
-            wallet.current_balance = round(wallet.current_balance - cost, 2)
-
-            if side == "sell":
-                order.pnl = round(fill_data["filled_amount"] * fill_data["fill_price"], 2)
+            filled = fill_data["filled_amount"]
+            fill_px = fill_data["fill_price"]
+            if side == "buy":
+                cost = filled * fill_px
+                wallet.current_balance = round(wallet.current_balance - cost, 2)
             else:
-                order.pnl = round(fill_data["filled_amount"] * (1 - fill_data["fill_price"]), 2)
+                proceeds = filled * fill_px
+                wallet.current_balance = round(wallet.current_balance + proceeds, 2)
+            order.pnl = None  # realized on resolution or cancel, never at entry
 
         session.add(order)
         await session.commit()
@@ -242,11 +257,15 @@ class PaperTradingService:
         if not order or order.status in (OrderStatus.FILLED, OrderStatus.CANCELLED):
             return False
 
-        if order.status == OrderStatus.PARTIAL and order.filled_amount > 0 and order.fill_price:
+        if order.filled_amount > 0 and order.fill_price:
             wallet_result = await session.execute(select(PaperWallet).where(PaperWallet.id == order.wallet_id))
             wallet = wallet_result.scalar_one_or_none()
             if wallet:
-                wallet.current_balance = round(wallet.current_balance + order.filled_amount * order.fill_price, 2)
+                refund = order.filled_amount * order.fill_price
+                if order.side == "buy":
+                    wallet.current_balance = round(wallet.current_balance + refund, 2)
+                else:
+                    wallet.current_balance = round(wallet.current_balance - refund, 2)
 
         order.status = OrderStatus.CANCELLED
         await session.commit()
@@ -349,25 +368,6 @@ class PaperTradingService:
             "current_balance": round(wallet.current_balance, 2) if wallet else None,
             "initial_balance": round(wallet.initial_balance, 2) if wallet else None,
         }
-
-        try:
-            duck = DuckDBManager()
-            duck.record_strategy_performance({
-                "id": f"paper_{strategy_id or 'all'}_{datetime.now(timezone.utc).isoformat()}",
-                "strategy_id": strategy_id or "all",
-                "total_trades": total_trades,
-                "win_rate": round(win_rate, 4),
-                "profit_loss": round(total_pnl, 2),
-                "sharpe_ratio": sharpe_ratio,
-                "max_drawdown": round(max_dd, 4),
-                "avg_rr": avg_rr,
-                "kelly_optimal": kelly_optimal,
-                "period_start": datetime.now(timezone.utc).date(),
-                "period_end": datetime.now(timezone.utc).date(),
-            })
-        except Exception:
-            pass
-
         return result
 
     def _compute_brier_score(self, orders: list) -> float | None:
@@ -380,6 +380,7 @@ class PaperTradingService:
         self, resolutions: list[dict], session: AsyncSession
     ) -> dict[str, Any]:
         updated = 0
+        wallet_deltas: dict[str, float] = {}
         for r in resolutions:
             market_id = r.get("market_id")
             platform = r.get("platform")
@@ -398,7 +399,19 @@ class PaperTradingService:
                 order.resolved_outcome = outcome
                 actual = 1.0 if outcome == "yes" else 0.0
                 order.calibration_error = round((order.price - actual) ** 2, 4)
+                if order.filled_amount and order.fill_price:
+                    pnl = order.filled_amount * (actual - order.fill_price)
+                    if order.side == "sell":
+                        pnl = -pnl
+                    order.pnl = round(pnl, 2)
+                    wallet_deltas[order.wallet_id] = wallet_deltas.get(order.wallet_id, 0) + pnl
                 updated += 1
+
+        for wallet_id, delta in wallet_deltas.items():
+            w_result = await session.execute(select(PaperWallet).where(PaperWallet.id == wallet_id))
+            wallet = w_result.scalar_one_or_none()
+            if wallet:
+                wallet.current_balance = round(wallet.current_balance + delta, 2)
 
         await session.commit()
         return {"updated": updated, "resolutions": len(resolutions)}

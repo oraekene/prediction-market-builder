@@ -60,6 +60,7 @@ class SpawnedAgent:
         self._heartbeat_at = 0.0
         self._iteration_count = 0
         self._events: list[dict[str, Any]] = []
+        self._task: asyncio.Task | None = None
 
     def record_event(self, event_type: AgentEvent, detail: str = "") -> None:
         self._events.append({
@@ -84,10 +85,11 @@ class SpawnedAgent:
 
 
 class AgentSpawner:
-    def __init__(self):
+    def __init__(self, tool_registry=None):
         self._agents: dict[str, SpawnedAgent] = {}
         self._lock = asyncio.Lock()
         self._concurrent_limit = MAX_CONCURRENT_CHILDREN
+        self._tool_registry = tool_registry
 
     async def spawn_agent(
         self,
@@ -116,7 +118,8 @@ class AgentSpawner:
             self._agents[agent_id] = agent
             agent.record_event(AgentEvent.SPAWNED)
 
-        asyncio.create_task(self._run_agent(agent))
+        task = asyncio.create_task(self._run_agent(agent))
+        agent._task = task
         return agent
 
     async def spawn_batch(
@@ -150,6 +153,8 @@ class AgentSpawner:
             from app.ai.hermes_sidecar import HermesSidecar
 
             hermes = HermesSidecar()
+            if self._tool_registry is not None:
+                hermes.set_tool_registry(self._tool_registry)
             if not hermes.available:
                 raise RuntimeError("Hermes not available for sub-agent")
 
@@ -187,6 +192,12 @@ class AgentSpawner:
                 agent.completed_at = time.time()
             agent.record_event(AgentEvent.COMPLETED)
 
+        except asyncio.CancelledError:
+            async with self._lock:
+                agent.status = AgentStatus.CANCELLED
+                agent.error = "Cancelled"
+                agent.completed_at = time.time()
+            agent.record_event(AgentEvent.CANCELLED, "Cancelled")
         except Exception as exc:
             logger.exception("Sub-agent '%s' failed: %s", agent.agent_id, exc)
             async with self._lock:
@@ -212,10 +223,12 @@ class AgentSpawner:
             "result": agent.result,
         }
 
-    def terminate_agent(self, agent_id: str) -> bool:
+    async def terminate_agent(self, agent_id: str) -> bool:
         agent = self._agents.get(agent_id)
         if not agent or agent.status not in (AgentStatus.PENDING, AgentStatus.RUNNING):
             return False
+        if agent._task is not None and not agent._task.done():
+            agent._task.cancel()
         agent.status = AgentStatus.CANCELLED
         agent.completed_at = time.time()
         agent.record_event(AgentEvent.CANCELLED, "Terminated by user")
@@ -244,7 +257,7 @@ class AgentSpawner:
         for agent_id, agent in list(self._agents.items()):
             if agent.is_stale:
                 stale.append(agent_id)
-                self.terminate_agent(agent_id)
+                await self.terminate_agent(agent_id)
         if stale:
             logger.info("Cleaned %d stale agents: %s", len(stale), stale)
         return stale

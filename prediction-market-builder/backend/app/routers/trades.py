@@ -1,18 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_session
 from app.models.trade import Trade, TradeStatus
+from app.models.user import User
+from app.routers.auth import get_current_user
 from app.services.risk_manager import RiskManager, RiskProfile
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 
 
-@router.post("/evaluate")
-async def evaluate_trade(body: dict):
-    profile_dict = body.get("risk_profile", {})
-    profile = RiskProfile(
+def _build_profile(profile_dict: dict) -> RiskProfile:
+    return RiskProfile(
         max_position_size=profile_dict.get("max_position_size", 0.2),
         max_drawdown=profile_dict.get("max_drawdown", 0.15),
         stop_loss=profile_dict.get("stop_loss", 0.1),
@@ -21,29 +21,29 @@ async def evaluate_trade(body: dict):
         min_confidence=profile_dict.get("min_confidence", 0.6),
         rules=profile_dict.get("rules", []),
     )
-    mgr = RiskManager(profile)
 
-    market = body.get("market", {})
-    signal = body.get("signal", {})
-    portfolio = body.get("portfolio", {})
 
-    result = await mgr.evaluate_trade(market, signal, portfolio)
+@router.post("/evaluate")
+async def evaluate_trade(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+):
+    mgr = RiskManager(_build_profile(body.get("risk_profile", {})))
+    result = await mgr.evaluate_trade(
+        body.get("market", {}),
+        body.get("signal", {}),
+        body.get("portfolio", {}),
+    )
     return result
 
 
-@router.post("")
-async def create_trade(body: dict, session: AsyncSession = Depends(get_session)):
-    profile_dict = body.get("risk_profile", {})
-    profile = RiskProfile(
-        max_position_size=profile_dict.get("max_position_size", 0.2),
-        max_drawdown=profile_dict.get("max_drawdown", 0.15),
-        stop_loss=profile_dict.get("stop_loss", 0.1),
-        kelly_fraction=profile_dict.get("kelly_fraction", 0.25),
-        max_correlation=profile_dict.get("max_correlation", 0.7),
-        min_confidence=profile_dict.get("min_confidence", 0.6),
-        rules=profile_dict.get("rules", []),
-    )
-    mgr = RiskManager(profile)
+@router.post("", status_code=201)
+async def create_trade(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    mgr = RiskManager(_build_profile(body.get("risk_profile", {})))
 
     market = body.get("market", {})
     signal = body.get("signal", {})
@@ -58,7 +58,7 @@ async def create_trade(body: dict, session: AsyncSession = Depends(get_session))
         }
 
     trade = Trade(
-        user_id=body.get("user_id", "default"),
+        user_id=current_user.id,
         strategy_id=body.get("strategy_id"),
         market_id=market.get("platform_market_id", ""),
         platform=market.get("platform", "unknown"),
@@ -88,19 +88,27 @@ async def create_trade(body: dict, session: AsyncSession = Depends(get_session))
 
 @router.get("")
 async def list_trades(
-    status: str | None = None,
-    limit: int = 50,
+    status: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(Trade).order_by(Trade.created_at.desc()).limit(limit)
+    query = (
+        select(Trade)
+        .where(Trade.user_id == current_user.id)
+        .order_by(Trade.created_at.desc())
+        .limit(limit)
+    )
     if status:
-        query = query.where(Trade.status == TradeStatus(status))
+        try:
+            query = query.where(Trade.status == TradeStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     rows = await session.execute(query)
     trades = []
     for t in rows.scalars().all():
         trades.append({
             "id": t.id,
-            "user_id": t.user_id,
             "strategy_id": t.strategy_id,
             "market_id": t.market_id,
             "platform": t.platform,

@@ -1,13 +1,49 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 _RESOURCE_BLOCKLIST = ["image", "media", "font", "stylesheet"]
+
+_BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
+
+
+def is_public_url(url: str) -> bool:
+    """Reject non-http(s) URLs and any URL resolving to a private/loopback address."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _BLOCKED_HOSTS or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except OSError:
+            return False
+        if not resolved:
+            return False
+        try:
+            ip = ipaddress.ip_address(resolved[0][4][0])
+        except ValueError:
+            return False
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return False
+    return True
 
 
 class CamoufoxCrawler:
@@ -117,6 +153,17 @@ class CamoufoxCrawler:
                         pass
 
     async def extract_page_safe(self, url: str) -> dict[str, Any]:
+        if not is_public_url(url):
+            logger.warning("extract_page_safe blocked non-public URL: %s", url)
+            return {
+                "url": url,
+                "title": "",
+                "content": None,
+                "accessibility_tree": None,
+                "status_code": 0,
+                "took_ms": 0,
+                "error": "URL not allowed (must be a public http/https address)",
+            }
         try:
             result = await asyncio.wait_for(
                 self.extract_page(url),

@@ -114,9 +114,14 @@ class DriftConnector(ExchangeConnector):
                 error=str(e),
             )
 
-    async def cancel_order(self, platform_order_id: str) -> bool:
+    async def cancel_order(self, platform_order_id: str, credentials: dict | None = None) -> bool:
+        credentials = credentials or {}
         try:
-            await self._request("DELETE", f"/v1/orders/{platform_order_id}")
+            await self._request(
+                "DELETE",
+                f"/v1/orders/{platform_order_id}",
+                api_key=credentials.get("api_key", ""),
+            )
             return True
         except Exception:
             return False

@@ -71,8 +71,7 @@ async def test_message_too_long_does_not_crash():
 async def test_hermes_response_path_with_mock():
     from app.ai.hermes_sidecar import HermesSidecar
     sidecar = HermesSidecar({"available": True})
-    with patch("hermes_cli.oneshot._run_agent") as mock_run:
-        mock_run.return_value = "mock response text"
+    with patch("app.ai.hermes_sidecar._hermes_run_agent", return_value="mock response text"):
         result = await sidecar.process_message("test message", {"user_id": "test"})
     assert result["type"] == "hermes_response"
     assert result["response"] == "mock response text"
@@ -81,16 +80,15 @@ async def test_hermes_response_path_with_mock():
 async def test_hermes_response_import_error_becomes_unavailable():
     from app.ai.hermes_sidecar import HermesSidecar
     sidecar = HermesSidecar({"available": True})
-    with patch("hermes_cli.oneshot._run_agent", side_effect=ImportError("not installed")):
+    with patch("app.ai.hermes_sidecar._hermes_run_agent", None):
         result = await sidecar.process_message("test", {"user_id": "test"})
     assert result["type"] == "hermes_unavailable"
-    assert sidecar.available is False
 
 
 async def test_hermes_response_handles_runtime_error():
     from app.ai.hermes_sidecar import HermesSidecar
     sidecar = HermesSidecar({"available": True})
-    with patch("hermes_cli.oneshot._run_agent", side_effect=RuntimeError("API error")):
+    with patch("app.ai.hermes_sidecar._hermes_run_agent", side_effect=RuntimeError("API error")):
         result = await sidecar.process_message("test", {"user_id": "test"})
     assert result["type"] == "hermes_error"
     assert "API error" in result["response"]

@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import logging
+import threading
+import time
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -11,12 +13,35 @@ from jose import jwt, JWTError
 from app.database import get_session
 from app.config import settings
 from app.models.user import User
-from app.services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
+
+_MAX_LOGIN_ATTEMPTS = 5
+_LOCKOUT_WINDOW_SECONDS = 15 * 60
+_failed_logins: dict[str, list[float]] = {}
+_failed_logins_lock = threading.Lock()
+
+
+def _check_lockout(email: str) -> None:
+    now = time.monotonic()
+    with _failed_logins_lock:
+        attempts = [t for t in _failed_logins.get(email, []) if now - t < _LOCKOUT_WINDOW_SECONDS]
+        _failed_logins[email] = attempts
+        if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Too many failed attempts. Try again later.")
+
+
+def _record_failed_login(email: str) -> None:
+    with _failed_logins_lock:
+        _failed_logins.setdefault(email, []).append(time.monotonic())
+
+
+def _clear_failed_logins(email: str) -> None:
+    with _failed_logins_lock:
+        _failed_logins.pop(email, None)
 
 
 class RegisterRequest(BaseModel):
@@ -71,17 +96,35 @@ async def get_current_user(
 ) -> User:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    payload = _decode_token(credentials.credentials)
+    return await get_user_from_token(credentials.credentials, session)
+
+
+async def get_user_from_token(
+    token: str | None,
+    session: AsyncSession | None = None,
+) -> User:
+    """Resolve a bearer token to a User. Used by both HTTP and WebSocket endpoints."""
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = _decode_token(token)
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Token must be an access token")
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid token: missing subject")
-    result = await session.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-    return user
+    owns_session = session is not None
+    if not owns_session:
+        from app.database import async_session as _async_session
+        session = _async_session()
+    try:
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+        return user
+    finally:
+        if not owns_session:
+            await session.close()
 
 
 @router.get("/me")
@@ -92,7 +135,31 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "display_name": current_user.display_name,
         "has_polymarket_key": bool(current_user.polymarket_key),
         "has_kalshi_key": bool(current_user.kalshi_key),
+        "has_drift_key": bool(current_user.drift_key),
     }
+
+
+class ExchangeKeysRequest(BaseModel):
+    polymarket_key: str | None = None
+    kalshi_key: str | None = None
+    drift_key: str | None = None
+
+
+@router.put("/keys")
+async def set_exchange_keys(
+    req: ExchangeKeysRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.encryption import encryption_service
+    if req.polymarket_key:
+        current_user.polymarket_key = encryption_service.encrypt(req.polymarket_key)
+    if req.kalshi_key:
+        current_user.kalshi_key = encryption_service.encrypt(req.kalshi_key)
+    if req.drift_key:
+        current_user.drift_key = encryption_service.encrypt(req.drift_key)
+    await session.commit()
+    return {"success": True}
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -118,13 +185,16 @@ async def register(req: RegisterRequest, session: AsyncSession = Depends(get_ses
 
 @router.post("/login", response_model=TokenResponse)
 async def login(req: LoginRequest, session: AsyncSession = Depends(get_session)):
+    _check_lockout(req.email)
     from passlib.context import CryptContext
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     result = await session.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
     if not user or not pwd_context.verify(req.password, user.hashed_password):
+        _record_failed_login(req.email)
         logger.warning("Failed login attempt for %s", req.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    _clear_failed_logins(req.email)
     access_token = _create_token(user.id, "access")
     refresh_token = _create_token(user.id, "refresh")
     logger.info("User logged in: %s", user.id)

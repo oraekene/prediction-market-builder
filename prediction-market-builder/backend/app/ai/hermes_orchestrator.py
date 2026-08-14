@@ -14,7 +14,7 @@ from app.ai.rlm_service import RLMService
 from app.ai.tabpfn_service import TabPFNService
 from app.ai.market_regime_service import MarketRegimeService
 from app.ai.tool_registry import ToolRegistry, registry as _default_tool_registry
-from app.ai.agent_spawner import AgentSpawner, SpawnedAgent
+from app.ai.agent_spawner import AgentSpawner, SpawnedAgent, DEFAULT_MAX_ITERATIONS
 from app.ai.git_manager import GitManager
 from app.services.strategy_engine import StrategyEngine
 from app.services.market_aggregator import MarketAggregator
@@ -90,6 +90,7 @@ class HermesOrchestrator:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._max_retries = 3
+        self._max_sessions = 1000
         self._cognitive_goals: dict[str, list[dict[str, Any]]] = {}
         self._traces: dict[str, list[dict[str, Any]]] = {}
         self._on_strategy_created: list[Callable] = []
@@ -98,6 +99,12 @@ class HermesOrchestrator:
 
     def on_strategy_created(self, handler: Callable) -> None:
         self._on_strategy_created.append(handler)
+
+    def _list_registered_tool_names(self) -> list[str]:
+        try:
+            return [t["name"] for t in self.tool_registry.list_tools()]
+        except Exception:
+            return []
 
     def on_skill_created(self, handler: Callable) -> None:
         self._on_skill_created.append(handler)
@@ -110,6 +117,12 @@ class HermesOrchestrator:
 
     def _init_session(self, session_id: str) -> dict[str, Any]:
         if session_id not in self._sessions:
+            if len(self._sessions) >= self._max_sessions:
+                oldest = min(
+                    self._sessions,
+                    key=lambda sid: self._sessions[sid].get("last_activity", 0),
+                )
+                self._sessions.pop(oldest, None)
             self._sessions[session_id] = {
                 "session_id": session_id,
                 "created_at": time.time(),
@@ -203,7 +216,7 @@ class HermesOrchestrator:
                 "response": str(result.get("response", result.get("error", str(result))))[:2000],
                 "model": "hermes-sidecar",
                 "latency_ms": latency_ms,
-                "tool_calls_attempted": list(self.tool_registry.tools.keys()) if hasattr(self.tool_registry, 'tools') else [],
+                "tool_calls_attempted": self._list_registered_tool_names(),
                 "tool_results": [],
                 "classification_chain": [{"intent": intent.value, "confidence": 1.0}],
             }
@@ -678,6 +691,25 @@ class HermesOrchestrator:
             "response": "Full analysis pipeline complete. See steps for details.",
         }
 
+    async def spawn_agent(
+        self,
+        goal: str,
+        context: str | None = None,
+        toolsets: list[str] | None = None,
+        max_iterations: int | None = None,
+        role: str = "leaf",
+        parent_session_id: str = "default",
+    ):
+        """Public wrapper around sub-agent spawning."""
+        return await self.agent_spawner.spawn_agent(
+            goal=goal,
+            context=context,
+            toolsets=toolsets,
+            max_iterations=max_iterations or DEFAULT_MAX_ITERATIONS,
+            role=role,
+            parent_session_id=parent_session_id,
+        )
+
     async def _handle_spawn_agent(
         self,
         message: str,
@@ -826,8 +858,9 @@ class HermesOrchestrator:
         self._sessions.pop(session_id, None)
         self._state.pop(session_id, None)
         self._cognitive_goals.pop(session_id, None)
+        self._traces.pop(session_id, None)
         for agent in self.agent_spawner.get_agents_by_session(session_id):
-            self.agent_spawner.terminate_agent(agent.agent_id)
+            await self.agent_spawner.terminate_agent(agent.agent_id)
 
     def get_cognitive_goals(self, session_id: str = "default") -> list[dict[str, Any]]:
         return self._cognitive_goals.get(session_id, [])

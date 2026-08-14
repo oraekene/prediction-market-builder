@@ -20,23 +20,15 @@ async def test_health_no_auth_required(client):
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint(client):
+async def test_metrics_endpoint_removed(client):
     resp = await client.get("/metrics")
-    assert resp.status_code == 200
-    content = resp.text
-    assert "# HELP" in content or "# TYPE" in content or "python" in content.lower()
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_metrics_no_auth_required(client):
-    resp = await client.get("/metrics")
-    assert resp.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_metrics_returns_prometheus_format(client):
-    resp = await client.get("/metrics")
-    assert "text/plain" in resp.headers.get("content-type", "")
+async def test_metrics_requires_auth_for_other_routes(client):
+    resp = await client.get("/api/strategies")
+    assert resp.status_code in (401, 403)
 
 
 @pytest.mark.asyncio

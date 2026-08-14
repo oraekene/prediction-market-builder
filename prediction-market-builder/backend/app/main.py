@@ -1,15 +1,13 @@
-import asyncio
 import logging
-from uuid import uuid4
-
+import os
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from sqlalchemy import select
-from app.database import engine, create_tables
+from app.database import engine
 from app.routers import auth, markets, strategies, chat, portfolio, analytics, research, risk, orchestrator, repl, alchemy, risk_templates, trades, paper_trading, meta_strategies, explainability, withdrawal
 from app.agentic_search import search_router
 from app.routers.auth import get_current_user
@@ -23,14 +21,14 @@ from app.ai.rlm_service import RLMService
 from app.ai.hermes_sidecar import HermesSidecar
 from app.ai.hermes_orchestrator import HermesOrchestrator
 from app.ai.skill_creator import SkillCreator
-from app.ai.watchdog import WatchdogService, HealthStatus
+from app.ai.watchdog import WatchdogService
 from app.ai.tool_registry import ToolRegistry, registry as tool_registry
 from app.ai.agent_spawner import AgentSpawner
 from app.ai.git_manager import GitManager
 from app.ai.repl_service import REPLService
 from app.ai.shap_explainer import ShapExplainer
 from app.services.explainability_service import ExplainabilityService
-from app.ai.alchemy_service import AlchemyService, AlchemyRequest, ConnectionEngine
+from app.ai.alchemy_service import AlchemyService, AlchemyRequest
 from app.ai.domain_providers import DomainRegistry
 from app.agentic_search.search_orchestrator import SearchOrchestrator
 from app.ai.domain_providers.market_provider import MarketDomainProvider
@@ -65,7 +63,7 @@ hermes = HermesSidecar()
 market_aggregator = MarketAggregator()
 strategy_engine = StrategyEngine()
 git_manager = GitManager(repo_path=Path("./data/skills_repo"))
-agent_spawner = AgentSpawner()
+agent_spawner = AgentSpawner(tool_registry=tool_registry)
 repl_service = REPLService()
 
 try:
@@ -116,8 +114,6 @@ def _check_chromadb() -> bool:
 
 async def _on_unhealthy_handler(check_name: str, check_result: dict) -> None:
     logger.error("UNHEALTHY trigger: %s - %s", check_name, check_result.get("error", "unknown"))
-    if check_name == "hermes":
-        orchestrator_instance.hermes = HermesSidecar()
     await watchdog.track_session_activity("_system")
 
 
@@ -125,7 +121,7 @@ def _on_recovery_handler(check_name: str) -> None:
     logger.info("RECOVERY: %s is healthy again", check_name)
 
 
-watchdog.register_health_check("hermes", lambda: orchestrator_instance.hermes.available)
+watchdog.register_health_check("hermes", lambda: hermes.available)
 watchdog.register_health_check("chromadb", _check_chromadb)
 watchdog.register_health_check("scheduler_running", lambda: getattr(scheduler, '_running', False))
 
@@ -133,33 +129,15 @@ watchdog.on_unhealthy(_on_unhealthy_handler)
 watchdog.on_recovery(_on_recovery_handler)
 
 
-async def _migrate_passwords():
-    from app.database import async_session
-    from app.models.user import User
-    from passlib.context import CryptContext
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    async with async_session() as session:
-        result = await session.execute(select(User))
-        users = result.scalars().all()
-        migrated = 0
-        for u in users:
-            if not u.hashed_password.startswith("$2b$"):
-                u.hashed_password = pwd_ctx.hash(u.hashed_password)
-                migrated += 1
-        if migrated:
-            await session.commit()
-            logger.info("Migrated %d plain-text passwords to bcrypt", migrated)
-
-
 async def lifespan(app: FastAPI):
+    os.makedirs(settings.rlm_archive_root, exist_ok=True)
     git_manager.init_repo()
-    await create_tables()
-    await _migrate_passwords()
     await explainability_service.initialize()
 
     _register_rlm_tools(tool_registry, rlm)
     _register_search_tools(tool_registry, search_orchestrator)
     _register_repl_tools(tool_registry, repl_service)
+    repl.init_repl(repl_service)
     if alchemy_service is not None:
         _register_alchemy_tools(tool_registry, alchemy_service)
         alchemy.init_alchemy(alchemy_service)
@@ -197,16 +175,16 @@ def _register_rlm_tools(tr: ToolRegistry, rlm_service: RLMService) -> None:
         name="rlm_scan_directory",
         toolset="rlm",
         schema={
-            "description": "Recursively scan a directory for alpha signals using dspy.RLM",
+            "description": "Recursively scan the RLM archive directory for alpha signals using dspy.RLM",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "directory": {"type": "string", "description": "Path to scan"},
+                    "directory": {"type": "string", "description": "Path relative to the archive root"},
                     "keywords": {"type": "string", "description": "Comma-separated keywords"},
                 },
             },
         },
-        handler=lambda **kw: {"result": "rlm_scan_dispatched"},
+        handler=lambda **kw: _handle_rlm_scan(rlm_service, kw),
         check_fn=lambda: rlm_service.check_available(),
         shared_check_key="dspy",
     )
@@ -224,7 +202,11 @@ def _register_rlm_tools(tr: ToolRegistry, rlm_service: RLMService) -> None:
                 },
             },
         },
-        handler=lambda **kw: {"result": "rlm_drift_dispatched"},
+        handler=lambda **kw: rlm_service.detect_linguistic_drift(
+            texts_historical=kw.get("historical_texts") or [],
+            texts_recent=kw.get("recent_texts") or [],
+            target_entities=[e.strip() for e in (kw.get("entities") or "").split(",") if e.strip()],
+        ),
         check_fn=lambda: rlm_service.check_available(),
         shared_check_key="dspy",
     )
@@ -241,10 +223,24 @@ def _register_rlm_tools(tr: ToolRegistry, rlm_service: RLMService) -> None:
                 },
             },
         },
-        handler=lambda **kw: {"result": "rlm_sub_agent_dispatched"},
+        handler=lambda **kw: rlm_service.spawn_sub_agent(
+            document=kw.get("document", ""),
+            instruction=kw.get("instruction", "Extract alpha signals"),
+        ),
         check_fn=lambda: rlm_service.check_available(),
         shared_check_key="dspy",
     )
+
+
+async def _handle_rlm_scan(rlm_service: RLMService, kw: dict) -> dict:
+    keywords = [k.strip() for k in (kw.get("keywords") or "").split(",") if k.strip()]
+    try:
+        return await rlm_service.scan_directory(
+            directory=kw.get("directory") or ".",
+            keywords=keywords or None,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 def _register_alchemy_tools(tr: ToolRegistry, alchemy_service: AlchemyService) -> None:
@@ -352,6 +348,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 if settings.rate_limit_per_minute > 0:
     from app.middleware.rate_limit import RateLimitMiddleware
     app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_per_minute)
+from app.services.metrics import MetricsMiddleware
+app.add_middleware(MetricsMiddleware)
 
 
 app.include_router(auth.router)

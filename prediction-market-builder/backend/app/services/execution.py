@@ -107,18 +107,15 @@ class ExecutionEngine:
         from app.services.encryption import encryption_service
         creds: dict[str, str] = {}
         if user.polymarket_key:
-            try:
-                raw = encryption_service.decrypt(user.polymarket_key)
-                parts = raw.split(":", 1)
-                creds["api_key"] = parts[0]
-                if len(parts) > 1:
-                    creds["secret"] = parts[1]
-            except Exception:
-                creds["api_key"] = user.polymarket_key
+            raw = encryption_service.decrypt(user.polymarket_key)
+            parts = raw.split(":", 1)
+            creds["api_key"] = parts[0]
+            if len(parts) > 1:
+                creds["secret"] = parts[1]
         if user.kalshi_key:
-            creds["private_key"] = user.kalshi_key
+            creds["private_key"] = encryption_service.decrypt(user.kalshi_key)
         if user.drift_key:
-            creds["api_key"] = user.drift_key
+            creds["api_key"] = encryption_service.decrypt(user.drift_key)
         return creds
 
     def _get_connector(self, platform: str):
@@ -148,8 +145,9 @@ class ExecutionEngine:
         )
         return await connector.place_order(order, credentials)
 
-    async def cancel_order(self, platform: str, platform_order_id: str) -> bool:
-        return await self._get_connector(platform).cancel_order(platform_order_id)
+    async def cancel_order(self, platform: str, platform_order_id: str, user=None) -> bool:
+        credentials = self._get_credentials(user) if user is not None else {}
+        return await self._get_connector(platform).cancel_order(platform_order_id, credentials)
 
     async def get_order_status(self, platform: str, platform_order_id: str) -> FillResult:
         return await self._get_connector(platform).get_order_status(platform_order_id)

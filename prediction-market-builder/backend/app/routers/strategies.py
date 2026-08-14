@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from app.database import get_session
 from app.models.strategy import Strategy, StrategyStatus
 from app.models.template import StrategyTemplate
+from app.models.user import User
+from app.routers.auth import get_current_user
 from app.services.node_executor import ExecutionContext
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
@@ -36,8 +38,47 @@ def init_strategy_engine(strategy_engine, tabpfn=None, market_regime=None,
     _market_aggregator = market_aggregator
 
 
+def _serialize_strategy(s: Strategy) -> dict:
+    return {
+        "id": s.id,
+        "user_id": s.user_id,
+        "name": s.name,
+        "description": s.description,
+        "mode": s.mode,
+        "nodes": s.nodes,
+        "edges": s.edges,
+        "risk_profile": s.risk_profile,
+        "status": s.status.value,
+        "version": s.version,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+def _serialize_template(t: StrategyTemplate) -> dict:
+    return {
+        "id": t.id,
+        "name": t.name,
+        "description": t.description,
+        "config": t.config,
+        "tags": t.tags,
+        "usage_count": t.usage_count,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+    }
+
+
+async def _get_owned_strategy(strategy_id: str, user: User, session: AsyncSession) -> Strategy:
+    result = await session.execute(
+        select(Strategy).where(Strategy.id == strategy_id, Strategy.user_id == user.id)
+    )
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return strategy
+
+
 class CreateStrategyRequest(BaseModel):
-    user_id: str = "default"
     name: str = "New Strategy"
     description: str | None = None
     mode: str = "chat"
@@ -70,15 +111,24 @@ class UpdateStrategyRequest(BaseModel):
 
 
 @router.get("")
-async def list_strategies(user_id: str = "default", session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.user_id == user_id))
-    return result.scalars().all()
+async def list_strategies(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Strategy).where(Strategy.user_id == current_user.id)
+    )
+    return [_serialize_strategy(s) for s in result.scalars().all()]
 
 
-@router.post("")
-async def create_strategy(data: CreateStrategyRequest, session: AsyncSession = Depends(get_session)):
+@router.post("", status_code=201)
+async def create_strategy(
+    data: CreateStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     strategy = Strategy(
-        user_id=data.user_id,
+        user_id=current_user.id,
         name=data.name,
         description=data.description,
         mode=data.mode,
@@ -89,17 +139,24 @@ async def create_strategy(data: CreateStrategyRequest, session: AsyncSession = D
     session.add(strategy)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.get("/templates")
-async def list_templates(session: AsyncSession = Depends(get_session)):
+async def list_templates(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(select(StrategyTemplate).order_by(StrategyTemplate.updated_at.desc()))
-    return result.scalars().all()
+    return [_serialize_template(t) for t in result.scalars().all()]
 
 
-@router.post("/templates")
-async def create_template(data: CreateTemplateRequest, session: AsyncSession = Depends(get_session)):
+@router.post("/templates", status_code=201)
+async def create_template(
+    data: CreateTemplateRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     template = StrategyTemplate(
         name=data.name,
         description=data.description,
@@ -109,20 +166,29 @@ async def create_template(data: CreateTemplateRequest, session: AsyncSession = D
     session.add(template)
     await session.commit()
     await session.refresh(template)
-    return template
+    return _serialize_template(template)
 
 
 @router.get("/templates/{template_id}")
-async def get_template(template_id: str, session: AsyncSession = Depends(get_session)):
+async def get_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(select(StrategyTemplate).where(StrategyTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
-    return template
+    return _serialize_template(template)
 
 
 @router.put("/templates/{template_id}")
-async def update_template(template_id: str, data: UpdateTemplateRequest, session: AsyncSession = Depends(get_session)):
+async def update_template(
+    template_id: str,
+    data: UpdateTemplateRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(select(StrategyTemplate).where(StrategyTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
@@ -137,11 +203,15 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, session
         template.tags = data.tags
     await session.commit()
     await session.refresh(template)
-    return template
+    return _serialize_template(template)
 
 
 @router.delete("/templates/{template_id}")
-async def delete_template(template_id: str, session: AsyncSession = Depends(get_session)):
+async def delete_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(select(StrategyTemplate).where(StrategyTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
@@ -151,15 +221,19 @@ async def delete_template(template_id: str, session: AsyncSession = Depends(get_
     return {"status": "deleted"}
 
 
-@router.post("/templates/{template_id}/apply")
-async def apply_template(template_id: str, session: AsyncSession = Depends(get_session)):
+@router.post("/templates/{template_id}/apply", status_code=201)
+async def apply_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(select(StrategyTemplate).where(StrategyTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     config = template.config
     strategy = Strategy(
-        user_id="default",
+        user_id=current_user.id,
         name=template.name,
         description=template.description,
         mode=config.get("mode", "chat"),
@@ -171,24 +245,27 @@ async def apply_template(template_id: str, session: AsyncSession = Depends(get_s
     template.usage_count += 1
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.get("/{strategy_id}")
-async def get_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-    return strategy
+async def get_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
+    return _serialize_strategy(strategy)
 
 
 @router.put("/{strategy_id}")
-async def update_strategy(strategy_id: str, data: UpdateStrategyRequest, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def update_strategy(
+    strategy_id: str,
+    data: UpdateStrategyRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if data.name is not None:
         strategy.name = data.name
     if data.description is not None:
@@ -203,42 +280,45 @@ async def update_strategy(strategy_id: str, data: UpdateStrategyRequest, session
         strategy.risk_profile = data.risk_profile
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.delete("/{strategy_id}")
-async def delete_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def delete_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     await session.delete(strategy)
     await session.commit()
     return {"status": "deleted"}
 
 
 @router.post("/{strategy_id}/deploy")
-async def deploy_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def deploy_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if strategy.status == StrategyStatus.ACTIVE:
-        return strategy
+        return _serialize_strategy(strategy)
     _save_version_snapshot(strategy)
     strategy.status = StrategyStatus.ACTIVE
     strategy.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.post("/{strategy_id}/pause")
-async def pause_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def pause_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if strategy.status != StrategyStatus.ACTIVE:
         raise HTTPException(status_code=400, detail="Only active strategies can be paused")
     _save_version_snapshot(strategy)
@@ -246,15 +326,16 @@ async def pause_strategy(strategy_id: str, session: AsyncSession = Depends(get_s
     strategy.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.post("/{strategy_id}/resume")
-async def resume_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def resume_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if strategy.status != StrategyStatus.PAUSED:
         raise HTTPException(status_code=400, detail="Only paused strategies can be resumed")
     _save_version_snapshot(strategy)
@@ -262,31 +343,33 @@ async def resume_strategy(strategy_id: str, session: AsyncSession = Depends(get_
     strategy.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.post("/{strategy_id}/archive")
-async def archive_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def archive_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if strategy.status == StrategyStatus.ARCHIVED:
-        return strategy
+        return _serialize_strategy(strategy)
     _save_version_snapshot(strategy)
     strategy.status = StrategyStatus.ARCHIVED
     strategy.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.post("/{strategy_id}/rollback")
-async def rollback_strategy(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def rollback_strategy(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     if not strategy.version_history:
         raise HTTPException(status_code=400, detail="No previous version to rollback to")
     prev = strategy.version_history[-1]
@@ -298,15 +381,16 @@ async def rollback_strategy(strategy_id: str, session: AsyncSession = Depends(ge
     strategy.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(strategy)
-    return strategy
+    return _serialize_strategy(strategy)
 
 
 @router.get("/{strategy_id}/history")
-async def get_strategy_history(strategy_id: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Strategy).where(Strategy.id == strategy_id))
-    strategy = result.scalar_one_or_none()
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
+async def get_strategy_history(
+    strategy_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    strategy = await _get_owned_strategy(strategy_id, current_user, session)
     return {
         "current_version": strategy.version,
         "history": strategy.version_history,
@@ -350,7 +434,10 @@ class EvaluateStrategyRequest(BaseModel):
 
 
 @router.post("/evaluate")
-async def evaluate_strategy(data: EvaluateStrategyRequest):
+async def evaluate_strategy(
+    data: EvaluateStrategyRequest,
+    current_user: User = Depends(get_current_user),
+):
     if not _strategy_engine:
         raise HTTPException(status_code=503, detail="Strategy engine not initialized")
 

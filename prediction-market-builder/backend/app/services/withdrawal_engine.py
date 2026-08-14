@@ -265,6 +265,8 @@ class WithdrawalEngine:
     ) -> dict:
         """Withdraw *pct* of the current portfolio value (or a specific asset)."""
         pct = action.get("pct", 0)
+        if not isinstance(pct, (int, float)) or pct < 0 or pct > 100:
+            raise ValueError("withdraw_pct requires pct between 0 and 100")
         asset = action.get("asset", "total")
         if asset == "total":
             value = portfolio.get("current_value", 0)
@@ -286,6 +288,8 @@ class WithdrawalEngine:
     ) -> dict | None:
         """Withdraw a fixed *amount* of *asset* if sufficient balance exists."""
         amount = action.get("amount", 0)
+        if not isinstance(amount, (int, float)) or amount < 0:
+            raise ValueError("withdraw_fixed requires a non-negative amount")
         asset = action.get("asset", "total")
         if asset == "total":
             available = portfolio.get("current_value", 0)

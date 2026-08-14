@@ -233,7 +233,7 @@ async def test_strategy_with_steps_workflow(client: AsyncClient):
         "description": "Strategy with 3 distinct steps",
         "steps": steps,
     })
-    assert create.status_code == 200
+    assert create.status_code == 201
     strat_id = create.json()["id"]
     assert create.json()["is_active"] is True
     assert len(create.json()["steps"]) == 3
@@ -362,7 +362,7 @@ async def test_cross_user_isolation_e2e(client: AsyncClient):
              "action": {"type": "withdraw_pct", "pct": 50}},
         ],
     })
-    assert strat.status_code == 200
+    assert strat.status_code == 201
     strat_id = strat.json()["id"]
 
     # User A can see wallet
@@ -477,7 +477,7 @@ async def test_full_auto_profit_protection_simulation(client: AsyncClient):
         "steps": steps,
         "safe_wallet_id": wallet_id,
     })
-    assert strat.status_code == 200
+    assert strat.status_code == 201
     strat_id = strat.json()["id"]
     assert strat.json()["is_active"] is True
     assert strat.json()["safe_wallet_id"] == wallet_id

@@ -28,13 +28,13 @@ async def test_chat_message_empty(authenticated_client):
     resp = await authenticated_client.post("/api/chat/message", json={
         "message": "",
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_chat_message_no_body(authenticated_client):
     resp = await authenticated_client.post("/api/chat/message", json={})
-    assert resp.status_code == 200
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
 
 class GitError(Exception):
@@ -15,8 +18,17 @@ class GitError(Exception):
 
 class GitManager:
     def __init__(self, repo_path: str | Path):
-        self.repo_path = Path(repo_path)
+        self.repo_path = Path(repo_path).resolve()
         self._skills_dir = self.repo_path / "skills"
+
+    def _safe_skill_path(self, skill_name: str, suffix: str = ".py") -> Path:
+        """Validate a skill name and return its path, guaranteed inside the skills dir."""
+        if not _SKILL_NAME_RE.match(skill_name):
+            raise GitError(f"Invalid skill name: {skill_name!r}")
+        path = (self._skills_dir / f"{skill_name}{suffix}").resolve()
+        if not path.is_relative_to(self._skills_dir.resolve()):
+            raise GitError("Skill path escapes the skills directory")
+        return path
 
     def init_repo(self) -> bool:
         self.repo_path.mkdir(parents=True, exist_ok=True)
@@ -39,10 +51,10 @@ class GitManager:
 
     def save_skill_code(self, skill_name: str, code: str, description: str) -> dict[str, Any]:
         self._skills_dir.mkdir(parents=True, exist_ok=True)
-        skill_file = self._skills_dir / f"{skill_name}.py"
+        skill_file = self._safe_skill_path(skill_name, ".py")
         skill_file.write_text(code)
 
-        skill_doc = self._skills_dir / f"{skill_name}.md"
+        skill_doc = self._safe_skill_path(skill_name, ".md")
         doc_content = (
             f"# {skill_name}\n\n"
             f"**Created:** {datetime.now(timezone.utc).isoformat()}\n\n"
@@ -57,6 +69,7 @@ class GitManager:
         }
 
     def commit_skill(self, skill_name: str, description: str) -> str | None:
+        self._safe_skill_path(skill_name)
         try:
             subprocess.run(
                 ["git", "add", "skills/"],
@@ -72,6 +85,7 @@ class GitManager:
             return None
 
     def get_skill_history(self, skill_name: str) -> list[dict[str, Any]]:
+        self._safe_skill_path(skill_name)
         try:
             result = subprocess.run(
                 ["git", "log", "--oneline", "--follow", "--", f"skills/{skill_name}.py"],
@@ -88,6 +102,9 @@ class GitManager:
             return []
 
     def rollback_skill(self, skill_name: str, commit_hash: str) -> bool:
+        self._safe_skill_path(skill_name)
+        if not re.match(r"^[0-9a-f]{7,40}$", commit_hash):
+            raise GitError("Invalid commit hash")
         try:
             subprocess.run(
                 ["git", "checkout", commit_hash, "--", f"skills/{skill_name}.py"],
@@ -105,7 +122,7 @@ class GitManager:
         return [f.stem for f in self._skills_dir.glob("*.py")]
 
     def read_skill_code(self, skill_name: str) -> str | None:
-        skill_file = self._skills_dir / f"{skill_name}.py"
+        skill_file = self._safe_skill_path(skill_name)
         if skill_file.exists():
             return skill_file.read_text()
         return None

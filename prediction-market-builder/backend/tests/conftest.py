@@ -1,4 +1,8 @@
 import os
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key-0123456789abcdef0123456789abcdef")
+os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef")
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import create_engine

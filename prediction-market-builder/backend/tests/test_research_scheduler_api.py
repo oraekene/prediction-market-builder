@@ -149,6 +149,10 @@ async def test_stop_no_scheduler(authenticated_client, no_scheduler):
 
 @pytest.mark.asyncio
 async def test_stop_success(authenticated_client, mock_scheduler):
+    me = await authenticated_client.get("/api/auth/me")
+    user_id = me.json()["id"]
+    session = make_mock_session(id="sess-1", user_id=user_id)
+    mock_scheduler.get_session.return_value = session
     mock_scheduler.stop_session.return_value = True
     response = await authenticated_client.post("/api/research/stop", params={"session_id": "sess-1"})
     assert response.status_code == 200
@@ -159,6 +163,7 @@ async def test_stop_success(authenticated_client, mock_scheduler):
 
 @pytest.mark.asyncio
 async def test_stop_not_found(authenticated_client, mock_scheduler):
+    mock_scheduler.get_session.return_value = None
     mock_scheduler.stop_session.return_value = False
     response = await authenticated_client.post("/api/research/stop", params={"session_id": "bad-id"})
     assert response.status_code == 404
@@ -243,8 +248,11 @@ async def test_get_session_detail_no_scheduler(authenticated_client, no_schedule
 
 @pytest.mark.asyncio
 async def test_get_session_detail_found(authenticated_client, mock_scheduler):
+    me = await authenticated_client.get("/api/auth/me")
+    user_id = me.json()["id"]
     session = make_mock_session(
         id="detail-sess-1",
+        user_id=user_id,
         strategy_id="strat-a",
         current_iteration=10,
         total_kept=7,
@@ -277,6 +285,10 @@ async def test_get_session_results_no_scheduler(authenticated_client, no_schedul
 
 @pytest.mark.asyncio
 async def test_get_session_results_with_data(authenticated_client, mock_scheduler):
+    me = await authenticated_client.get("/api/auth/me")
+    user_id = me.json()["id"]
+    session = make_mock_session(id="test-id", user_id=user_id)
+    mock_scheduler.get_session.return_value = session
     result = make_mock_result(iteration=1, verdict="KEPT", composite_score=1.8)
     mock_scheduler.get_session_results.return_value = [result]
     response = await authenticated_client.get("/api/research/sessions/test-id/results")
@@ -292,6 +304,10 @@ async def test_get_session_results_with_data(authenticated_client, mock_schedule
 
 @pytest.mark.asyncio
 async def test_get_session_results_empty(authenticated_client, mock_scheduler):
+    me = await authenticated_client.get("/api/auth/me")
+    user_id = me.json()["id"]
+    session = make_mock_session(id="test-id", user_id=user_id)
+    mock_scheduler.get_session.return_value = session
     mock_scheduler.get_session_results.return_value = []
     response = await authenticated_client.get("/api/research/sessions/test-id/results")
     assert response.status_code == 200

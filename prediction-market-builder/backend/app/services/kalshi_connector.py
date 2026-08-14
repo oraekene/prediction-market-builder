@@ -140,9 +140,14 @@ class KalshiConnector(ExchangeConnector):
                 error=str(e),
             )
 
-    async def cancel_order(self, platform_order_id: str) -> bool:
+    async def cancel_order(self, platform_order_id: str, credentials: dict | None = None) -> bool:
+        credentials = credentials or {}
         try:
-            await self._request("DELETE", f"/portfolio/order/{platform_order_id}")
+            await self._request(
+                "DELETE",
+                f"/portfolio/order/{platform_order_id}",
+                private_key=credentials.get("private_key", ""),
+            )
             return True
         except Exception:
             return False

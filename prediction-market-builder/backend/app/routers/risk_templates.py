@@ -4,18 +4,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models.risk_template import RiskTemplate
+from app.models.user import User
+from app.routers.auth import get_current_user
 from app.services.risk_manager import RiskManager, RiskProfile
 
 router = APIRouter(prefix="/api/risk-templates", tags=["risk-templates"])
 
 
-@router.post("")
-async def create_risk_template(body: dict, session: AsyncSession = Depends(get_session)):
+async def _get_owned_template(template_id: str, user: User, session: AsyncSession) -> RiskTemplate:
+    result = await session.execute(
+        select(RiskTemplate).where(
+            RiskTemplate.id == template_id,
+            RiskTemplate.user_id == user.id,
+        )
+    )
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(404, detail="Risk template not found")
+    return template
+
+
+@router.post("", status_code=201)
+async def create_risk_template(
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    name = body.get("name")
+    if not name:
+        raise HTTPException(400, detail="name is required")
     template = RiskTemplate(
-        name=body["name"],
+        name=name,
         description=body.get("description", ""),
         rules=body.get("rules", []),
-        user_id=body.get("user_id", "default"),
+        user_id=current_user.id,
     )
     session.add(template)
     await session.commit()
@@ -24,25 +46,37 @@ async def create_risk_template(body: dict, session: AsyncSession = Depends(get_s
 
 
 @router.get("")
-async def list_risk_templates(session: AsyncSession = Depends(get_session)):
-    rows = await session.execute(select(RiskTemplate).order_by(RiskTemplate.created_at.desc()))
+async def list_risk_templates(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    rows = await session.execute(
+        select(RiskTemplate)
+        .where(RiskTemplate.user_id == current_user.id)
+        .order_by(RiskTemplate.created_at.desc())
+    )
     templates = [t for t in rows.scalars().all()]
     return {"templates": [_template_response(t) for t in templates]}
 
 
 @router.get("/{template_id}")
-async def get_risk_template(template_id: str, session: AsyncSession = Depends(get_session)):
-    template = await session.get(RiskTemplate, template_id)
-    if not template:
-        raise HTTPException(404, detail="Risk template not found")
+async def get_risk_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    template = await _get_owned_template(template_id, current_user, session)
     return _template_response(template)
 
 
 @router.put("/{template_id}")
-async def update_risk_template(template_id: str, body: dict, session: AsyncSession = Depends(get_session)):
-    template = await session.get(RiskTemplate, template_id)
-    if not template:
-        raise HTTPException(404, detail="Risk template not found")
+async def update_risk_template(
+    template_id: str,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    template = await _get_owned_template(template_id, current_user, session)
     if "name" in body:
         template.name = body["name"]
     if "description" in body:
@@ -55,20 +89,25 @@ async def update_risk_template(template_id: str, body: dict, session: AsyncSessi
 
 
 @router.delete("/{template_id}")
-async def delete_risk_template(template_id: str, session: AsyncSession = Depends(get_session)):
-    template = await session.get(RiskTemplate, template_id)
-    if not template:
-        raise HTTPException(404, detail="Risk template not found")
+async def delete_risk_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    template = await _get_owned_template(template_id, current_user, session)
     await session.delete(template)
     await session.commit()
     return {"status": "deleted"}
 
 
 @router.post("/{template_id}/evaluate")
-async def evaluate_risk_template_endpoint(template_id: str, body: dict, session: AsyncSession = Depends(get_session)):
-    template = await session.get(RiskTemplate, template_id)
-    if not template:
-        raise HTTPException(404, detail="Risk template not found")
+async def evaluate_risk_template_endpoint(
+    template_id: str,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    template = await _get_owned_template(template_id, current_user, session)
     signal = body.get("signal", {})
     portfolio = body.get("portfolio", {})
     profile = RiskProfile(rules=template.rules)

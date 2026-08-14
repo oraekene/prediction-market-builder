@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 import logging
 import subprocess
-from typing import Any, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 logger = logging.getLogger(__name__)
 
-ToolHandler = Callable[..., dict[str, Any]]
+ToolHandler = Callable[..., Any]
 AvailabilityCheck = Callable[[], bool]
 ExecutionMode = Literal["in_memory", "container"]
 
@@ -75,6 +78,8 @@ class ToolRegistry:
             if tool.execution_mode == "container":
                 return self._dispatch_container(tool, args_dict)
             result = tool.handler(**(args_dict or {}))
+            if inspect.isawaitable(result):
+                return {"error": f"Tool '{name}' handler is async — use await execute() instead"}
             if not isinstance(result, dict):
                 return {"result": result}
             return result
@@ -82,9 +87,35 @@ class ToolRegistry:
             logger.exception("Tool '%s' dispatch failed: %s", name, exc)
             return {"error": f"Tool dispatch failed: {exc}"}
 
+    async def execute(self, tool_name: str, args_dict: dict[str, Any] | None = None) -> dict[str, Any]:
+        tool = self._tools.get(tool_name)
+        if not tool:
+            return {"error": f"Unknown tool: {tool_name}"}
+        if tool.check_fn and not tool.check_fn():
+            return {"error": f"Tool '{tool_name}' is not available"}
+        try:
+            if tool.execution_mode == "container":
+                return await asyncio.to_thread(self._dispatch_container, tool, args_dict)
+            result = tool.handler(**(args_dict or {}))
+            if inspect.isawaitable(result):
+                result = await result
+            if not isinstance(result, dict):
+                return {"result": result}
+            return result
+        except Exception as exc:
+            logger.exception("Tool '%s' dispatch failed: %s", tool_name, exc)
+            return {"error": f"Tool dispatch failed: {exc}"}
+
     def _dispatch_container(self, tool: ToolDefinition, args_dict: dict[str, Any] | None = None) -> dict[str, Any]:
-        import json
-        cmd = ["docker", "run", "--rm"]
+        cmd = [
+            "docker", "run", "--rm",
+            "--network=none",
+            "--read-only",
+            "--user", "65534:65534",
+            "--memory", "512m",
+            "--cpus", "1",
+            "--pids-limit", "64",
+        ]
         if tool.container_image:
             cmd.append(tool.container_image)
         cmd.extend(tool.container_command or [])

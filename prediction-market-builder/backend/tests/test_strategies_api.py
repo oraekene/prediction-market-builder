@@ -46,7 +46,7 @@ async def test_create_strategy(authenticated_client):
         "edges": [],
         "risk_profile": {"max_drawdown": 0.1},
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Test Strategy"
     assert data["mode"] == "chat"
@@ -57,7 +57,7 @@ async def test_create_strategy(authenticated_client):
 @pytest.mark.asyncio
 async def test_create_strategy_minimal(authenticated_client):
     resp = await authenticated_client.post("/api/strategies", json={"name": "Minimal"})
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Minimal"
     assert data["nodes"] == []
@@ -182,7 +182,7 @@ async def test_create_strategy_template(authenticated_client):
         "config": {"mode": "chat", "nodes": []},
         "tags": ["trending", "momentum"],
     })
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Test Template"
     assert data["tags"] == ["trending", "momentum"]
@@ -205,7 +205,7 @@ async def test_apply_template(authenticated_client):
     })
     tid = tpl_resp.json()["id"]
     resp = await authenticated_client.post(f"/api/strategies/templates/{tid}/apply")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "ApplyTpl"
     assert data["mode"] == "chat"

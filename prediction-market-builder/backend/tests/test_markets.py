@@ -1,10 +1,10 @@
 import pytest
-from app.services.market_aggregator import PolymarketConnector
+from app.services.market_aggregator import PolymarketMarketData
 
 
 @pytest.mark.asyncio
 async def test_polymarket_normalize():
-    connector = PolymarketConnector()
+    connector = PolymarketMarketData()
     raw = {
         "id": "123",
         "question": "Will it rain?",
@@ -21,7 +21,7 @@ async def test_polymarket_normalize():
 
 @pytest.mark.asyncio
 async def test_polymarket_normalize_empty():
-    connector = PolymarketConnector()
+    connector = PolymarketMarketData()
     result = connector._normalize({})
     assert result["platform_market_id"] == ""
     assert result["current_odds"] == 0.5

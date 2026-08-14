@@ -102,29 +102,23 @@ def evolve_population(
     pop_size: int = 10,
     elite_size: int = 2,
 ) -> list[dict[str, Any]]:
+    def _to_individual(r: dict[str, Any]) -> HypothesisIndividual:
+        backtest_config = r.get("backtest_config") or {}
+        return HypothesisIndividual(
+            template=r.get("template") or random.choice(HYPOTHESIS_TEMPLATES),
+            feature=r.get("feature") or (top_features[0] if top_features else "odds"),
+            operator=r.get("operator") or backtest_config.get("operator", "gt"),
+            threshold=r.get("threshold", backtest_config.get("threshold", 0.5)),
+            regime_affinity=r.get("regime_affinity", []),
+            composite_score=r.get("composite_score", 0.0),
+        )
+
     kept = [
         r for r in past_results if r.get("verdict") == "KEPT"
     ]
-    elite = [
-        HypothesisIndividual(
-            template=r["template"],
-            feature=r["feature"],
-            operator=r.get("operator", "gt"),
-            threshold=r.get("threshold", 0.5),
-            regime_affinity=r.get("regime_affinity", []),
-            composite_score=r.get("composite_score", 0.0),
-        )
-        for r in kept[:elite_size]
-    ]
+    elite = [_to_individual(r) for r in kept[:elite_size]]
     all_past_individuals = [
-        HypothesisIndividual(
-            template=r["template"],
-            feature=r["feature"],
-            operator=r.get("operator", "gt"),
-            threshold=r.get("threshold", 0.5),
-            regime_affinity=r.get("regime_affinity", []),
-            composite_score=r.get("composite_score", 0.0),
-        )
+        _to_individual(r)
         for r in past_results
         if r.get("verdict") != "KEPT"
     ]

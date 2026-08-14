@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -41,8 +42,12 @@ class SafeWalletService:
         strategy_id: str | None,
         session: AsyncSession,
     ) -> dict:
-        if amount <= 0:
-            return {"success": False, "error": "Amount must be positive"}
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Amount must be a number"}
+        if not math.isfinite(amount) or amount <= 0:
+            return {"success": False, "error": "Amount must be a positive finite number"}
 
         result = await session.execute(
             select(SafeWallet).where(

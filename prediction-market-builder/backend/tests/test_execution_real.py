@@ -33,15 +33,18 @@ class TestExecutionEngine:
             order_id="c1", platform_order_id="p1", status="filled",
             filled_amount=100, fill_price=0.55, total_cost=55, slippage=0.0,
         )
+        from app.services.encryption import encryption_service
         user = MagicMock()
         user.id = "u1"
-        user.polymarket_key = "key:secret"
+        user.polymarket_key = encryption_service.encrypt("key:secret")
         user.kalshi_key = None
         user.drift_key = None
 
         fill = await engine.place_order("polymarket", "123", "buy", 100, 0.55, user)
         assert fill.status == "filled"
         assert fill.platform_order_id == "p1"
+        placed_order, placed_creds = mock_conn.place_order.await_args.args
+        assert placed_creds == {"api_key": "key", "secret": "secret"}
 
     @pytest.mark.asyncio
     async def test_calculate_slippage_buy(self, engine):

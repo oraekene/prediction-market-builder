@@ -9,7 +9,7 @@ class TestTemplateCRUD:
             "config": {"mode": "chat", "nodes": [], "edges": []},
             "tags": ["trend", "momentum"],
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Trend Following"
         assert "id" in data
@@ -70,7 +70,7 @@ class TestTemplateCRUD:
         })
         tid = created.json()["id"]
         resp = await authenticated_client.post(f"/api/strategies/templates/{tid}/apply")
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Scalping"
         assert data["nodes"] == [{"id": "1", "type": "threshold"}]

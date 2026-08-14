@@ -104,14 +104,15 @@ class TestSearchE2E:
     def orch(self, mock_orch):
         return mock_orch
 
-    def test_tool_registry_search_web(self, orch, sample_response):
+    @pytest.mark.asyncio
+    async def test_tool_registry_search_web(self, orch, sample_response):
         tr = ToolRegistry()
         register_search_tools(tr, orch)
 
         tools = tr.list_tools(toolset_filter="search")
         assert len(tools) == 3
 
-        result = tr.dispatch("search_web", {
+        result = await tr.execute("search_web", {
             "query": "bitcoin price",
             "depth": "quick",
             "max_results": 5,
@@ -119,35 +120,39 @@ class TestSearchE2E:
         assert result["total_found"] == 2
         assert result["results"][0]["engine"] == "google"
 
-    def test_tool_registry_search_news(self, orch):
+    @pytest.mark.asyncio
+    async def test_tool_registry_search_news(self, orch):
         tr = ToolRegistry()
         register_search_tools(tr, orch)
 
-        result = tr.dispatch("search_news", {"query": "latest news", "max_results": 3})
+        result = await tr.execute("search_news", {"query": "latest news", "max_results": 3})
         assert result["total_found"] == 2
         assert len(result["results"]) == 2
 
-    def test_tool_registry_search_crawl(self, orch):
+    @pytest.mark.asyncio
+    async def test_tool_registry_search_crawl(self, orch):
         tr = ToolRegistry()
         register_search_tools(tr, orch)
 
-        result = tr.dispatch("search_crawl", {"url": "https://example.com"})
+        result = await tr.execute("search_crawl", {"url": "https://example.com"})
         assert result["url"] == "https://example.com"
         assert result["status_code"] == 200
 
-    def test_tool_search_web_defaults_depth(self, orch):
+    @pytest.mark.asyncio
+    async def test_tool_search_web_defaults_depth(self, orch):
         tr = ToolRegistry()
         register_search_tools(tr, orch)
 
-        result = tr.dispatch("search_web", {"query": "test"})
+        result = await tr.execute("search_web", {"query": "test"})
         assert "results" in result
 
-    def test_tool_search_error_on_orchestrator_failure(self, orch):
+    @pytest.mark.asyncio
+    async def test_tool_search_error_on_orchestrator_failure(self, orch):
         orch.search = AsyncMock(side_effect=Exception("Search failed"))
         tr = ToolRegistry()
         register_search_tools(tr, orch)
 
-        result = tr.dispatch("search_web", {"query": "test"})
+        result = await tr.execute("search_web", {"query": "test"})
         assert "error" in result
 
 

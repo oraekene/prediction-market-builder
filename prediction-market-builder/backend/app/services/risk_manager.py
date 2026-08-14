@@ -13,7 +13,12 @@ def _get_risk_registry() -> NodeRegistry:
     if _RISK_REGISTRY is None:
         _RISK_REGISTRY = NodeRegistry()
         register_risk_handlers(_RISK_REGISTRY)
+        from app.services.advanced_risk_node_handlers import register_advanced_risk_handlers
+        register_advanced_risk_handlers(_RISK_REGISTRY)
     return _RISK_REGISTRY
+
+
+get_risk_registry = _get_risk_registry
 
 
 _CONDITION_NODE_MAP = {

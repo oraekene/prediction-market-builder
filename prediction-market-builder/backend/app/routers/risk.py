@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models.trade import Trade, TradeStatus
+from app.models.user import User
+from app.routers.auth import get_current_user
 from app.services.risk_calculator import RiskCalculator
 from app.services.portfolio_manager import PortfolioManager
 from app.services.tabpfn_integration import TabPFNQuantileEstimator
@@ -15,9 +17,15 @@ tabpfn_est = TabPFNQuantileEstimator()
 
 
 @router.get("/summary")
-async def risk_summary(session: AsyncSession = Depends(get_session)):
+async def risk_summary(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     rows = await session.execute(
-        select(Trade).where(Trade.status == TradeStatus.EXECUTED).order_by(Trade.created_at.desc()).limit(100)
+        select(Trade)
+        .where(Trade.status == TradeStatus.EXECUTED, Trade.user_id == current_user.id)
+        .order_by(Trade.created_at.asc())
+        .limit(100)
     )
     trades = rows.scalars().all()
     pnls = [float(t.pnl or 0) for t in trades]
@@ -41,10 +49,13 @@ async def risk_summary(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/var")
-async def risk_var(confidence: float = Query(0.95, ge=0.5, le=0.999),
-                   session: AsyncSession = Depends(get_session)):
+async def risk_var(
+    confidence: float = Query(0.95, ge=0.5, le=0.999),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     rows = await session.execute(
-        select(Trade).where(Trade.status == TradeStatus.EXECUTED)
+        select(Trade).where(Trade.status == TradeStatus.EXECUTED, Trade.user_id == current_user.id)
     )
     pnls = [float(t.pnl or 0) for t in rows.scalars().all()]
     hist = calc.historical_var(pnls, confidence)
@@ -61,9 +72,12 @@ async def risk_var(confidence: float = Query(0.95, ge=0.5, le=0.999),
 
 
 @router.get("/correlation")
-async def risk_correlation(session: AsyncSession = Depends(get_session)):
+async def risk_correlation(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     rows = await session.execute(
-        select(Trade).where(Trade.status == TradeStatus.EXECUTED)
+        select(Trade).where(Trade.status == TradeStatus.EXECUTED, Trade.user_id == current_user.id)
     )
     trades = rows.scalars().all()
     by_market: dict[str, list[float]] = {}
@@ -84,15 +98,20 @@ async def risk_correlation(session: AsyncSession = Depends(get_session)):
                 corr_matrix = calc.correlation_matrix({assets[i]: a_ret, assets[j]: b_ret})
                 val = corr_matrix[assets[i]][assets[j]]
                 pairs.append({"asset_a": assets[i], "asset_b": assets[j], "correlation": val})
-            except Exception:
-                pass
+            except ZeroDivisionError:
+                continue
     return {"pairs": pairs, "total_assets": len(assets)}
 
 
 @router.get("/drawdown")
-async def risk_drawdown(session: AsyncSession = Depends(get_session)):
+async def risk_drawdown(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     rows = await session.execute(
-        select(Trade).where(Trade.status == TradeStatus.EXECUTED).order_by(Trade.created_at.asc())
+        select(Trade)
+        .where(Trade.status == TradeStatus.EXECUTED, Trade.user_id == current_user.id)
+        .order_by(Trade.created_at.asc())
     )
     trades = rows.scalars().all()
     capital_series = _build_capital_series(trades)
@@ -111,21 +130,23 @@ async def risk_drawdown(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/portfolio")
-async def risk_portfolio(session: AsyncSession = Depends(get_session)):
+async def risk_portfolio(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     rows = await session.execute(
-        select(Trade).where(Trade.status == TradeStatus.EXECUTED)
+        select(Trade).where(Trade.status == TradeStatus.EXECUTED, Trade.user_id == current_user.id)
     )
     trades = rows.scalars().all()
     positions = _build_positions(trades)
-    pnls = [float(t.pnl or 0) for t in trades]
+    by_market: dict[str, list[float]] = {}
+    for t in trades:
+        by_market.setdefault(t.market_id, []).append(float(t.pnl or 0))
+    total = sum(p["size"] for p in positions)
     enriched = []
     for p in positions:
-        market_rows = await session.execute(
-            select(Trade).where(Trade.market_id == p["market_id"], Trade.status == TradeStatus.EXECUTED)
-        )
-        market_pnls = [float(t.pnl or 0) for t in market_rows.scalars().all()]
+        market_pnls = by_market.get(p["market_id"], [])
         market_var = calc.historical_var(market_pnls, 0.95) if market_pnls else 0.0
-        total = sum(p2["size"] for p2 in positions)
         weight = p["size"] / total if total > 0 else 0
         enriched.append({
             "market_id": p["market_id"],
